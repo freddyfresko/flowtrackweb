@@ -3,6 +3,7 @@ import { Routes, Route, useLocation } from 'react-router-dom';
 import { useThemeStore } from './lib/stores';
 import { useSystemSettings } from './lib/stores/systemSettings';
 import { useDataStore } from './lib/stores/dataStore';
+import { initRuntimeConfig } from './lib/supabase';
 import { testConnection } from './lib/db';
 import { MobileLayout } from './components/MobileLayout';
 import { SplashScreen } from './components/SplashScreen';
@@ -27,7 +28,9 @@ export default function App() {
   useEffect(() => {
     initTheme();
     initSystemSettings();
-    testConnection()
+    // En producción, primero carga la config desde el server
+    initRuntimeConfig()
+      .then(() => testConnection())
       .then(() => {
         setDbStatus('ok');
         // Carga dashboard en paralelo con splash
