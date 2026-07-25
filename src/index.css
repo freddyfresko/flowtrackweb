@@ -1,0 +1,155 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root,
+.theme-light {
+  color-scheme: light;
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-surface-hover: #f3f4f6;
+  --color-surface-elevated: #f1f3f5;
+  --color-border: #e5e7eb;
+  --color-border-light: #d1d5db;
+  --color-border-strong: #cbd5e1;
+  --color-divider: #e2e8f0;
+  --color-text: #111827;
+  --color-text-secondary: #374151;
+  --color-text-tertiary: #687280;
+  --color-text-disabled: #9ca3af;
+  --color-text-on-accent: #ffffff;
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-light: #dbeafe;
+  --color-primary-rgb: 37 99 235;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-info: #2563eb;
+  --color-neutral: #687280;
+  --color-accent-purple: #7c3aed;
+  --color-accent-cyan: #0891b2;
+}
+
+.dark,
+.theme-dark {
+  color-scheme: dark;
+  --color-bg: #0d1117;
+  --color-surface: #1f2630;
+  --color-surface-hover: #2a3542;
+  --color-surface-elevated: #242c38;
+  --color-border: #2a3340;
+  --color-border-light: #323b48;
+  --color-border-strong: #3d4756;
+  --color-divider: #252c39;
+  --color-text: #e6e6e6;
+  --color-text-secondary: #a1a7b3;
+  --color-text-tertiary: #687280;
+  --color-text-disabled: #485563;
+  --color-text-on-accent: #ffffff;
+  --color-primary: #8b5cf6;
+  --color-primary-hover: #a855f7;
+  --color-primary-light: #2f1b62;
+  --color-primary-rgb: 139 92 246;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-info: #3882f6;
+  --color-neutral: #687280;
+  --color-accent-purple: #a855f7;
+  --color-accent-cyan: #06b6d4;
+}
+
+.theme-neutral {
+  color-scheme: dark;
+  --color-bg: #1a1f26;
+  --color-surface: #2b3138;
+  --color-surface-hover: #39414a;
+  --color-surface-elevated: #333a42;
+  --color-border: #343a42;
+  --color-border-light: #3f464f;
+  --color-border-strong: #48535d;
+  --color-divider: #2a3037;
+  --color-text: #e5e7eb;
+  --color-text-secondary: #b5b8c6;
+  --color-text-tertiary: #8b93a1;
+  --color-text-disabled: #687280;
+  --color-text-on-accent: #ffffff;
+  --color-primary: #6366f1;
+  --color-primary-hover: #8b5cf6;
+  --color-primary-light: #2e315f;
+  --color-primary-rgb: 99 102 241;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-info: #3b82f6;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  touch-action: manipulation;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* iOS safe areas */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Sheet animations */
+@keyframes sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes sheet-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+.animate-sheet-in { animation: sheet-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-sheet-out { animation: sheet-out 0.22s ease-in forwards; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop-in {
+  0% { opacity: 0; transform: scale(0.9); }
+  60% { transform: scale(1.05); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease both; }
+.animate-pop-in { animation: pop-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-page-enter { animation: page-enter 0.28s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Prevent text selection on UI chrome (feels more native) */
+.no-select { user-select: none; -webkit-user-select: none; }
+
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Better tap targets on iOS */
+button, [role="button"] { touch-action: manipulation; }
