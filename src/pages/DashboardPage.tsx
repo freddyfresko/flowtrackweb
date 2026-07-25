@@ -1,3 +1,4 @@
+import { useState, useCallback, useRef } from 'react';
 import { useDataStore } from '../lib/stores/dataStore';
 import { formatCurrency, formatNumber } from '../lib/utils/format';
 
@@ -7,6 +8,21 @@ export function DashboardPage() {
   const d = useDataStore((s) => s.dashboard);
   const status = useDataStore((s) => s.dashboardStatus);
   const reload = useDataStore((s) => s.initialiseDashboard);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshingRef = useRef(false);
+
+  const handleRefresh = useCallback(async () => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setRefreshing(true);
+    const start = Date.now();
+    await reload();
+    const elapsed = Date.now() - start;
+    const delay = Math.max(0, 600 - elapsed);
+    await new Promise((r) => setTimeout(r, delay));
+    refreshingRef.current = false;
+    setRefreshing(false);
+  }, [reload]);
 
   if (status === 'loading' && !d) {
     return (
@@ -42,9 +58,19 @@ export function DashboardPage() {
           <h1 className="text-lg font-bold text-[var(--color-text)]">Dashboard</h1>
           <p className="text-xs text-[var(--color-text-tertiary)]">{monthName} 2026</p>
         </div>
-        <button onClick={reload} className="text-xs text-[var(--color-text-tertiary)] px-2 py-1 rounded-lg active:scale-90 transition cursor-pointer">
-          🔄
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className={`text-xs px-2 py-1 rounded-lg transition cursor-pointer disabled:cursor-default ${
+              refreshing
+                ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)] animate-pulse'
+                : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] active:scale-90'
+            }`}
+          >
+            {refreshing ? '⟳ Actualizando…' : '🔄'}
+          </button>
+        </div>
       </div>
 
       {/* Alerts */}
