@@ -1,18 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { localDateKey } from '../lib/date';
-import { getTasks, createTask, updateTask } from '../lib/db/tasks';
+import { getTasks, createTask, updateTask, getSubtasks } from '../lib/db/tasks';
 import type { Task } from '../lib/types';
 import { SkeletonRow, EmptyState, ErrorState } from '../components/ui';
 import { useToast } from '../components/Toast';
-
-type TabKey = 'today' | 'upcoming' | 'overdue' | 'done';
-
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'today', label: 'Hoy' },
-  { key: 'upcoming', label: 'Próximas' },
-  { key: 'overdue', label: 'Atrasadas' },
-  { key: 'done', label: 'Hechas' },
-];
 
 const PRIORITY_RING: Record<string, string> = {
   urgent: 'ring-2 ring-red-500/50',
@@ -35,6 +26,14 @@ const PRIORITY_LABEL: Record<string, string> = {
   low: 'Baja',
 };
 
+const SECTION_CONFIG: { key: string; label: string; icon: string; color: string; textColor: string; bgColor: string }[] = [
+  { key: 'pending', label: 'Pendientes', icon: '📋', color: 'bg-yellow-500', textColor: 'text-yellow-500', bgColor: 'bg-yellow-500/10' },
+  { key: 'in_progress', label: 'En proceso', icon: '🔄', color: 'bg-blue-500', textColor: 'text-blue-500', bgColor: 'bg-blue-500/10' },
+  { key: 'blocked', label: 'Bloqueadas', icon: '🚫', color: 'bg-red-500', textColor: 'text-red-500', bgColor: 'bg-red-500/10' },
+  { key: 'testing', label: 'En prueba', icon: '🧪', color: 'bg-purple-500', textColor: 'text-purple-500', bgColor: 'bg-purple-500/10' },
+  { key: 'completed', label: 'Terminadas', icon: '✅', color: 'bg-green-500', textColor: 'text-green-500', bgColor: 'bg-green-500/10' },
+];
+
 const AREA_LABELS: Record<string, string> = {
   content: '🎬 Contenido',
   video: '🎥 Video',
@@ -50,12 +49,15 @@ function getAreaLabel(area: string): string {
   return AREA_LABELS[area] || area;
 }
 
+function isFinished(task: Task): boolean {
+  return task.status === 'completed' || task.status === 'cancelled';
+}
+
 export function TasksPage() {
   const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<TabKey>('today');
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [areaFilter, setAreaFilter] = useState<string>('');
   const [showCreate, setShowCreate] = useState(false);
@@ -90,6 +92,17 @@ export function TasksPage() {
     }
   };
 
+  const onStatusChange = async (task: Task, newStatus: Task['status']) => {
+    try {
+      await updateTask(task.id, { status: newStatus });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)));
+      toast.success(`Tarea movida a ${newStatus}`);
+    } catch (e) {
+      console.error('status change:', e);
+      toast.error('No se pudo cambiar estado');
+    }
+  };
+
   const onCreate = async (title: string, dueDate: string, priority: string) => {
     try {
       await createTask({ title, due_date: dueDate || null, priority, status: 'pending' });
@@ -102,21 +115,24 @@ export function TasksPage() {
     }
   };
 
-  const filtered = tasks.filter((t) => {
-    const isDone = t.status === 'completed' || t.status === 'cancelled';
-    if (tab === 'done') return isDone;
-    if (isDone) return false;
-    const due = t.due_date;
-    if (tab === 'today') return due === today;
-    if (tab === 'overdue') return due != null && due < today;
-    if (tab === 'upcoming') return due == null || due > today;
-    return true;
-  });
+  // Stats
+  const stats = useMemo(() => ({
+    pending: tasks.filter((t) => t.status === 'pending').length,
+    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
+    overdue: tasks.filter((t) => t.due_date != null && t.due_date < today && !isFinished(t)).length,
+    completed: tasks.filter((t) => t.status === 'completed').length,
+  }), [tasks, today]);
 
-  const counts = {
-    today: tasks.filter((t) => t.due_date === today && t.status !== 'completed' && t.status !== 'cancelled').length,
-    overdue: tasks.filter((t) => t.due_date != null && t.due_date < today && t.status !== 'completed' && t.status !== 'cancelled').length,
-  };
+  // Agrupar por status
+  const sections = useMemo(() => {
+    const grouped: Record<string, Task[]> = {};
+    for (const s of SECTION_CONFIG) grouped[s.key] = [];
+    for (const t of tasks) {
+      if (!grouped[t.status]) grouped[t.status] = [];
+      grouped[t.status].push(t);
+    }
+    return grouped;
+  }, [tasks]);
 
   if (loading) {
     return (
@@ -147,37 +163,19 @@ export function TasksPage() {
         </button>
       </div>
 
-      {/* Tabs — pill style */}
-      <div className="flex bg-[var(--color-bg)]/95 backdrop-blur-xl sticky top-[44px] z-10 px-3 py-2 border-b border-[var(--color-border)]">
-        <div className="flex gap-1 bg-[var(--color-surface)] rounded-full p-1 w-full">
-          {TABS.map((t) => {
-            const active = tab === t.key;
-            const showCount = counts[t.key] > 0;
-            return (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`flex-1 py-1.5 rounded-full text-xs font-medium transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1 ${
-                  active
-                    ? 'bg-[var(--color-primary)] text-[var(--color-text-on-accent)] shadow-sm'
-                    : 'text-[var(--color-text-tertiary)]'
-                }`}
-              >
-                {t.label}
-                {showCount && (
-                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] ${
-                    active ? 'bg-white/20' : 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
-                  }`}>
-                    {counts[t.key]}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+      {/* Stats cards */}
+      <div className="grid grid-cols-4 gap-1.5 px-3 py-2 border-b border-[var(--color-border)]">
+        <StatCard label="Pendientes" value={stats.pending} color="text-yellow-500" />
+        <StatCard label="En proceso" value={stats.in_progress} color="text-blue-500" />
+        {stats.overdue > 0 ? (
+          <StatCard label="Vencidas" value={stats.overdue} color="text-red-500" />
+        ) : (
+          <StatCard label="Completadas" value={stats.completed} color="text-green-500" />
+        )}
+        <StatCard label="Total" value={tasks.length} color="text-[var(--color-text-secondary)]" />
       </div>
 
-      {/* Filtros inline — pills de estado y área */}
+      {/* Filtros inline */}
       <div className="sticky top-[88px] z-10 bg-[var(--color-bg)]/95 backdrop-blur-xl px-3 py-1.5 border-b border-[var(--color-border)]">
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
           {['', 'pending', 'in_progress', 'blocked', 'testing', 'completed'].map((s) => (
@@ -210,21 +208,44 @@ export function TasksPage() {
         </div>
       </div>
 
-      <div className="px-3 pt-3">
-        {filtered.length === 0 ? (
-          <EmptyState
-            icon={tab === 'done' ? '🎉' : '📋'}
-            title={tab === 'done' ? 'Sin tareas completadas' : tab === 'today' ? 'Todo al día' : 'Sin tareas aquí'}
-            subtitle={tab === 'today' ? 'Disfruta el momento ✨' : undefined}
-            action={tab !== 'done' ? { label: '+ Crear tarea', onClick: () => setShowCreate(true) } : undefined}
-          />
-        ) : (
-          <div className="space-y-1.5">
-            {filtered.map((task) => (
-              <TaskRow key={task.id} task={task} onToggle={onToggle} />
-            ))}
-          </div>
-        )}
+      {/* Secciones por status */}
+      <div className="px-3 pt-3 space-y-4">
+        {SECTION_CONFIG.map((section) => {
+          const items = sections[section.key] || [];
+          if (items.length === 0 && section.key !== 'pending') return null;
+          return (
+            <div key={section.key}>
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="text-xs">{section.icon}</span>
+                <span className={`text-[11px] font-semibold uppercase tracking-wider ${section.textColor}`}>
+                  {section.label}
+                </span>
+                <span className="text-[10px] text-[var(--color-text-tertiary)]">({items.length})</span>
+              </div>
+              {items.length === 0 ? (
+                <div className="flex flex-col items-center py-4 text-xs text-[var(--color-text-tertiary)]">
+                  <span>Sin tareas pendientes ✨</span>
+                  {section.key === 'pending' && (
+                    <button onClick={() => setShowCreate(true)} className="mt-1 text-[var(--color-primary)] active:scale-95 transition cursor-pointer">
+                      + Crear primera tarea
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {items.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      onToggle={onToggle}
+                      onStatusChange={onStatusChange}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {showCreate && <CreateTaskSheet onClose={() => setShowCreate(false)} onCreate={onCreate} />}
@@ -232,7 +253,23 @@ export function TasksPage() {
   );
 }
 
-function TaskRow({ task, onToggle }: { task: Task; onToggle: (t: Task) => void }) {
+// ─── Sub-components ───
+
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] p-2 text-center">
+      <p className={`text-sm font-bold ${color}`}>{value}</p>
+      <p className="text-[9px] text-[var(--color-text-tertiary)] truncate">{label}</p>
+    </div>
+  );
+}
+
+function TaskRow({ task, onToggle, onStatusChange }: {
+  task: Task;
+  onToggle: (t: Task) => void;
+  onStatusChange: (t: Task, s: Task['status']) => void;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
   const isDone = task.status === 'completed';
   const isOverdue = task.due_date != null && task.due_date < localDateKey(new Date()) && !isDone;
   const [animating, setAnimating] = useState(false);
@@ -243,58 +280,105 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (t: Task) => void }
     onToggle(task);
   };
 
-  return (
-    <div
-      onClick={handleToggle}
-      className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer active:scale-[0.98] transition-all duration-200 ${
-        isDone
-          ? 'opacity-50 border-[var(--color-border)] border-dashed bg-transparent'
-          : 'bg-[var(--color-surface)] border-[var(--color-border)]'
-      } ${animating ? 'scale-[0.96] bg-[var(--color-surface-hover)]' : ''}`}
-    >
-      {/* Checkbox circular con priority ring */}
-      <span className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-        isDone
-          ? 'bg-green-500/20 text-green-500'
-          : `border-2 border-[var(--color-border-strong)] ${task.priority ? PRIORITY_RING[task.priority] : ''}`
-      }`}>
-        {isDone ? '✓' : ''}
-      </span>
+  const statusSteps: Task['status'][] = ['pending', 'in_progress', 'blocked', 'testing', 'completed'];
 
-      <div className="flex-1 min-w-0">
-        <p className={`text-xs font-medium text-[var(--color-text)] truncate ${isDone ? 'line-through' : ''}`}>
-          {task.title}
-        </p>
-        <p className="text-[10px] text-[var(--color-text-tertiary)] flex items-center gap-1.5 mt-0.5">
-          {task.due_date ? (
-            <span className={isOverdue ? 'text-red-400 font-medium' : ''}>
-              {isOverdue ? '⚠️ ' : ''}{task.due_date?.slice(5)}
-            </span>
-          ) : (
-            <span>Sin fecha</span>
-          )}
-          {task.area && (
-            <>
-              <span className="text-[var(--color-text-disabled)]">·</span>
-              <span className="truncate">{getAreaLabel(task.area)}</span>
-            </>
-          )}
-          {(task.subtask_count || 0) > 0 && (
-            <>
-              <span className="text-[var(--color-text-disabled)]">·</span>
-              <span className="text-[var(--color-text-tertiary)]">{task.subtask_count} sub</span>
-            </>
-          )}
-        </p>
+  return (
+    <>
+      <div
+        onClick={() => setShowMenu(true)}
+        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border cursor-pointer active:scale-[0.98] transition-all duration-200 ${
+          isDone
+            ? 'opacity-50 border-[var(--color-border)] border-dashed bg-transparent'
+            : 'bg-[var(--color-surface)] border-[var(--color-border)]'
+        } ${animating ? 'scale-[0.96] bg-[var(--color-surface-hover)]' : ''}`}
+      >
+        {/* Checkbox */}
+        <span
+          onClick={(e) => { e.stopPropagation(); handleToggle(); }}
+          className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
+            isDone
+              ? 'bg-green-500/20 text-green-500'
+              : `border-2 border-[var(--color-border-strong)] ${task.priority ? PRIORITY_RING[task.priority] : ''}`
+          }`}
+        >
+          {isDone ? '✓' : ''}
+        </span>
+
+        <div className="flex-1 min-w-0">
+          <p className={`text-xs font-medium text-[var(--color-text)] truncate ${isDone ? 'line-through' : ''}`}>
+            {task.title}
+          </p>
+          <p className="text-[10px] text-[var(--color-text-tertiary)] flex items-center gap-1.5 mt-0.5">
+            {task.due_date ? (
+              <span className={isOverdue ? 'text-red-400 font-medium' : ''}>
+                {isOverdue ? '⚠️ ' : ''}{task.due_date?.slice(5)}
+              </span>
+            ) : (
+              <span>Sin fecha</span>
+            )}
+            {task.area && (
+              <>
+                <span className="text-[var(--color-text-disabled)]">·</span>
+                <span className="truncate">{getAreaLabel(task.area)}</span>
+              </>
+            )}
+            {(task.subtask_count || 0) > 0 && (
+              <>
+                <span className="text-[var(--color-text-disabled)]">·</span>
+                <span className="text-[var(--color-text-tertiary)]">{task.subtask_count} sub</span>
+              </>
+            )}
+          </p>
+        </div>
+
+        {task.priority && task.priority !== 'medium' && (
+          <span className="flex items-center gap-1 text-[10px] flex-shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[task.priority]}`} />
+            <span className="text-[var(--color-text-tertiary)] hidden xs:inline">{PRIORITY_LABEL[task.priority]}</span>
+          </span>
+        )}
       </div>
 
-      {task.priority && task.priority !== 'medium' && (
-        <span className="flex items-center gap-1 text-[10px] flex-shrink-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[task.priority]}`} />
-          <span className="text-[var(--color-text-tertiary)] hidden xs:inline">{PRIORITY_LABEL[task.priority]}</span>
-        </span>
+      {/* Status quick-menu */}
+      {showMenu && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setShowMenu(false)}>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 w-full max-w-sm mx-3 mb-4 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] p-3 animate-pop-in"
+          >
+            <p className="text-xs font-bold text-[var(--color-text)] mb-2 truncate">{task.title}</p>
+            <div className="space-y-1">
+              {statusSteps.map((s) => {
+                const active = task.status === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => {
+                      if (!active) onStatusChange(task, s);
+                      setShowMenu(false);
+                    }}
+                    className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs transition cursor-pointer ${
+                      active
+                        ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)] font-semibold'
+                        : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)]'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${SECTION_CONFIG.find((c) => c.key === s)?.color || 'bg-gray-400'}`} />
+                    {SECTION_CONFIG.find((c) => c.key === s)?.label || s}
+                    {active && <span className="ml-auto text-[10px]">✓</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setShowMenu(false)}
+              className="mt-2 w-full py-2 rounded-xl bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-tertiary)] active:scale-[0.98] transition cursor-pointer"
+            >Cancelar</button>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -342,7 +426,6 @@ function CreateTaskSheet({ onClose, onCreate }: {
             className="w-full px-3 py-2.5 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--color-border)] text-sm text-[var(--color-text)]"
           />
 
-          {/* Prioridad — chips */}
           <div>
             <p className="text-[10px] font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider mb-1.5">Prioridad</p>
             <div className="flex gap-1.5">
