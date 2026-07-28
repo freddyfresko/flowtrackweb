@@ -15,24 +15,10 @@ function nowStr(): string {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function coerceRow<T>(row: Record<string, unknown>): T {
-  // Postgres BOOLEANs come back as `true`/`false` but the TS types say `number`
-  // Coerce is_archived, is_ignored, linked_manually, fired, auto_generated etc.
-  const out = { ...row };
-  for (const key of ['is_archived', 'is_ignored', 'linked_manually', 'fired', 'auto_generated', 'is_recurring']) {
-    if (typeof out[key] === 'boolean') out[key] = out[key] ? 1 : 0;
-  }
-  return out as unknown as T;
-}
-
-function coerceRows<T>(rows: unknown[] | null): T[] {
-  return (rows as Record<string, unknown>[] || []).map(coerceRow<T>);
-}
-
 async function selectOne<T>(table: string, column: string, value: string): Promise<T | null> {
   const { data, error } = await supabase.from(table).select('*').eq(column, value).maybeSingle();
   if (error) throw new Error(`DB error: ${error.message}`);
-  return data ? coerceRow<T>(data as Record<string, unknown>) : null;
+  return data ? data as unknown as T : null;
 }
 
 // ─── Social Accounts ───
@@ -43,7 +29,7 @@ export async function getSocialAccounts(platform?: string): Promise<SocialAccoun
   q = q.order('platform', { ascending: true }).order('created_at', { ascending: false });
   const { data, error } = await q;
   if (error) throw new Error(`DB error: ${error.message}`);
-  return coerceRows<SocialAccount>(data);
+  return (data as unknown as SocialAccount[]);
 }
 
 export async function getSocialAccountByPlatform(platform: string): Promise<SocialAccount | null> {
@@ -57,7 +43,7 @@ export async function getSocialAccountByPlatform(platform: string): Promise<Soci
     .limit(1)
     .maybeSingle();
   if (error) throw new Error(`DB error: ${error.message}`);
-  return data ? coerceRow<SocialAccount>(data as Record<string, unknown>) : null;
+  return data ? data as unknown as SocialAccount : null;
 }
 
 export async function getSocialAccountById(id: string): Promise<SocialAccount | null> {
@@ -143,7 +129,7 @@ export async function getSocialMediaPosts(accountId: string): Promise<SocialMedi
     .eq('social_account_id', accountId)
     .order('published_at', { ascending: false });
   if (error) throw new Error(`DB error: ${error.message}`);
-  return coerceRows<SocialMediaPost>(data);
+  return (data as unknown as unknown as SocialMediaPost[]);
 }
 
 export async function getSocialMediaPostById(id: string): Promise<SocialMediaPost | null> {
@@ -158,7 +144,7 @@ export async function getSocialMediaPostByPlatformId(platform: string, platformM
     .eq('platform_media_id', platformMediaId)
     .maybeSingle();
   if (error) throw new Error(`DB error: ${error.message}`);
-  return data ? coerceRow<SocialMediaPost>(data as Record<string, unknown>) : null;
+  return data ? data as unknown as SocialMediaPost : null;
 }
 
 export async function getUnlinkedPosts(accountId: string): Promise<SocialMediaPost[]> {
@@ -176,8 +162,7 @@ export async function getUnlinkedPosts(accountId: string): Promise<SocialMediaPo
   if (error) throw new Error(`DB error: ${error.message}`);
 
   return ((data as Record<string, unknown>[]) || [])
-    .filter(r => !linkedIds.has(r.id as string))
-    .map(coerceRow<SocialMediaPost>);
+    .filter(r => !linkedIds.has(r.id as string)) as unknown as SocialMediaPost[]
 }
 
 export async function createSocialMediaPost(
@@ -295,7 +280,7 @@ export async function getLinkedReelsForPosts(postIds: string[]): Promise<Record<
     .in('social_media_post_id', postIds);
   if (error) throw new Error(`DB error: ${error.message}`);
   const map: Record<string, ReelSocialLink> = {};
-  for (const l of coerceRows<ReelSocialLink>(data)) {
+  for (const l of (data as unknown as ReelSocialLink[])) {
     map[l.social_media_post_id] = l;
   }
   return map;

@@ -1,6 +1,7 @@
 import { supabase } from '../supabase';
-import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForJob, syncAutomaticTasksForReel } from './automaticTasks';
-import type { Job, JobStatus, Reel } from '../types';
+import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForReel } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
+import type { JobStatus, Reel } from '../types';
 
 function jobStatusFromReelStatus(status: Reel['status']): JobStatus {
   if (status === 'published') return 'delivered';
@@ -12,12 +13,6 @@ function jobStatusFromReelStatus(status: Reel['status']): JobStatus {
 
 function nowStr(): string {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
-}
-
-function coerceReel(row: Record<string, unknown>): Reel {
-  const out = { ...row };
-  if (typeof out.is_archived === 'boolean') out.is_archived = out.is_archived ? 1 : 0;
-  return out as unknown as Reel;
 }
 
 async function syncLinkedJobFromReel(reel: Reel): Promise<void> {
@@ -41,7 +36,6 @@ async function syncLinkedJobFromReel(reel: Reel): Promise<void> {
     updated_at: now,
   }).eq('id', reel.job_id);
 
-  await syncAutomaticTasksForJob({ ...job, title: reel.title, status: newStatus, updated_at: now } as unknown as Job);
 
   await supabase.from('filmmaker_reels').update({
     ideas: reel.idea ?? null,
@@ -78,7 +72,7 @@ export async function getReels(filters: ReelFilters = {}): Promise<Reel[]> {
   const { data, error } = await q;
   if (error) throw new Error(`DB error: ${error.message}`);
 
-  const items = ((data as Record<string, unknown>[]) || []).map(coerceReel);
+  const items = (data || []) as Reel[];
   items.sort((a, b) => {
     const pa = PRIORITY_ORDER[a.priority] ?? 2;
     const pb = PRIORITY_ORDER[b.priority] ?? 2;
@@ -99,7 +93,7 @@ export async function getReelById(id: string): Promise<Reel | null> {
     .eq('is_archived', false)
     .maybeSingle();
   if (error) throw new Error(`DB error: ${error.message}`);
-  return data ? coerceReel(data as Record<string, unknown>) : null;
+  return data ? data as unknown as Reel : null;
 }
 
 export async function createReel(data: Partial<Reel>): Promise<Reel> {
@@ -108,6 +102,10 @@ export async function createReel(data: Partial<Reel>): Promise<Reel> {
   const { error } = await supabase.from('reels').insert({
     id,
     job_id: data.job_id ?? null,
+    work_type: data.work_type || 'personal',
+    client_id: data.client_id ?? null,
+    amount: data.amount ?? null,
+    payment_status: data.payment_status || 'pending',
     title: data.title || 'Sin título',
     idea: data.idea ?? null,
     script: data.script ?? null,
@@ -138,7 +136,7 @@ export async function createReel(data: Partial<Reel>): Promise<Reel> {
 }
 
 const REEL_EDITABLE: (keyof Reel)[] = [
-  'job_id', 'title', 'idea', 'script', 'project', 'platform', 'category', 'objective',
+  'job_id', 'work_type', 'client_id', 'amount', 'payment_status', 'title', 'idea', 'script', 'project', 'platform', 'category', 'objective',
   'call_to_action', 'recording_date', 'editing_date', 'scheduled_date',
   'published_date', 'file_path', 'reference_link', 'publication_link',
   'notes', 'priority', 'status',
@@ -176,6 +174,7 @@ export async function deleteReel(id: string): Promise<void> {
   const { error } = await supabase.from('reels').delete().eq('id', id);
   if (error) throw new Error(`DB error: ${error.message}`);
   await deleteAutomaticTasksForSource('reel', id);
+  await deleteFinanceForSource('reel', id);
 }
 
 export async function getReelStats(): Promise<{
@@ -184,18 +183,21 @@ export async function getReelStats(): Promise<{
   scheduled: number;
   published_this_month: number;
 }> {
-  const { data: all } = await supabase.from('reels').select('id, status, created_at').eq('is_archived', false);
-  const rows = all || [];
-  const total = rows.length;
-  const in_production = rows.filter(r => ['idea', 'script', 'ready_to_record', 'recorded', 'editing', 'reviewing'].includes(r.status as string)).length;
-  const scheduled = rows.filter(r => r.status === 'scheduled').length;
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const published_this_month = rows.filter(r => {
-    if (r.status !== 'published') return false;
-    const d = (r as any).created_at as string;
-    return d ? d.slice(0, 7) === thisMonth : false;
-  }).length;
-  return { total, in_production, scheduled, published_this_month };
+
+  const [totalRes, inProdRes, schedRes, pubRes] = await Promise.all([
+    supabase.from('reels').select('*', { count: 'exact', head: true }).eq('is_archived', false),
+    supabase.from('reels').select('*', { count: 'exact', head: true }).in('status', ['idea', 'script', 'ready_to_record', 'recorded', 'editing', 'reviewing']).eq('is_archived', false),
+    supabase.from('reels').select('*', { count: 'exact', head: true }).eq('status', 'scheduled').eq('is_archived', false),
+    supabase.from('reels').select('*', { count: 'exact', head: true }).eq('status', 'published').gte('created_at', `${thisMonth}-01`).eq('is_archived', false),
+  ]);
+
+  return {
+    total: totalRes.count ?? 0,
+    in_production: inProdRes.count ?? 0,
+    scheduled: schedRes.count ?? 0,
+    published_this_month: pubRes.count ?? 0,
+  };
 }
 
 export async function seedDemoReels(): Promise<void> {

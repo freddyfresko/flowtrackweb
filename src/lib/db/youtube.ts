@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForYouTube } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 import type { Job, YouTubeVideo } from '../types';
 
 export interface YouTubeFilters {
@@ -13,16 +14,9 @@ function nowStr(): string {
   return new Date().toISOString().replace('T', ' ').slice(0, 19);
 }
 
-function coerceVideo(row: Record<string, unknown>): YouTubeVideo {
-  const out = { ...row };
-  if (typeof out.is_archived === 'boolean') out.is_archived = out.is_archived ? 1 : 0;
-  return out as unknown as YouTubeVideo;
-}
-
 const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 export async function getYouTubeVideos(filters: YouTubeFilters = {}): Promise<YouTubeVideo[]> {
-  void backfillYouTubeFromJobs();
 
   let q = supabase.from('youtube_videos').select('*').eq('is_archived', false);
   if (filters.status) q = q.eq('status', filters.status);
@@ -36,7 +30,7 @@ export async function getYouTubeVideos(filters: YouTubeFilters = {}): Promise<Yo
   const { data, error } = await q;
   if (error) throw new Error(`DB error: ${error.message}`);
 
-  const items = ((data as Record<string, unknown>[]) || []).map(coerceVideo);
+  const items = (data || []) as YouTubeVideo[];
   items.sort((a, b) => {
     const pa = PRIORITY_ORDER[a.priority] ?? 2;
     const pb = PRIORITY_ORDER[b.priority] ?? 2;
@@ -57,7 +51,7 @@ export async function getYouTubeById(id: string): Promise<YouTubeVideo | null> {
     .eq('is_archived', false)
     .maybeSingle();
   if (error) throw new Error(`DB error: ${error.message}`);
-  return data ? coerceVideo(data as Record<string, unknown>) : null;
+  return data ? data as unknown as YouTubeVideo : null;
 }
 
 export async function createYouTubeVideo(data: Partial<YouTubeVideo>): Promise<YouTubeVideo> {
@@ -66,6 +60,10 @@ export async function createYouTubeVideo(data: Partial<YouTubeVideo>): Promise<Y
   const { error } = await supabase.from('youtube_videos').insert({
     id,
     job_id: data.job_id ?? null,
+    work_type: data.work_type || 'personal',
+    client_id: data.client_id ?? null,
+    amount: data.amount ?? null,
+    payment_status: data.payment_status || 'pending',
     provisional_title: data.provisional_title || 'Sin título',
     final_title: data.final_title ?? null,
     idea: data.idea ?? null,
@@ -98,6 +96,7 @@ export async function createYouTubeVideo(data: Partial<YouTubeVideo>): Promise<Y
 }
 
 const YT_EDITABLE: (keyof YouTubeVideo)[] = [
+  'work_type', 'client_id', 'amount', 'payment_status',
   'provisional_title', 'final_title', 'idea', 'objective', 'project', 'script', 'research',
   'resources', 'references', 'description', 'tags', 'thumbnail', 'recording_date', 'editing_date',
   'published_date', 'material_path', 'project_path', 'published_link', 'notes', 'priority', 'status', 'job_id',
@@ -132,63 +131,35 @@ export async function deleteYouTubeVideo(id: string): Promise<void> {
   const { error } = await supabase.from('youtube_videos').delete().eq('id', id);
   if (error) throw new Error(`DB error: ${error.message}`);
   await deleteAutomaticTasksForSource('youtube', id);
+  await deleteFinanceForSource('youtube', id);
 }
 
-export async function syncYouTubeForJob(job: Job, data: Partial<YouTubeVideo> = {}): Promise<void> {
-  const { data: existing } = await supabase
-    .from('youtube_videos')
-    .select('*')
-    .eq('job_id', job.id)
-    .limit(1)
-    .maybeSingle();
-  const current = existing ? coerceVideo(existing as Record<string, unknown>) : null;
-
-  if (job.type !== 'youtube_video' || job.status === 'cancelled' || job.is_archived) {
-    if (current) await archiveYouTubeVideo(current.id);
-    return;
-  }
-
-  const payload: Partial<YouTubeVideo> = {
-    job_id: job.id,
-    provisional_title: data.provisional_title || job.title,
-    idea: data.idea || job.description || null,
-    description: data.description || job.description || null,
-    project: data.project || 'Cliente',
-    priority: data.priority || 'medium',
-    status: data.status || 'idea',
-    notes: data.notes || job.notes || 'Creado automáticamente desde Trabajos.',
-  };
-
-  if (current) await updateYouTubeVideo(current.id, payload);
-  else await createYouTubeVideo(payload);
+export async function syncYouTubeForJob(_job: Job, _data: any = {}): Promise<void> {
+  // Jobs module deprecated — no-op
 }
 
 export async function backfillYouTubeFromJobs(): Promise<void> {
-  const { data: jobs } = await supabase
-    .from('jobs')
-    .select('*')
-    .eq('type', 'youtube_video')
-    .eq('is_archived', false);
-  for (const job of (jobs || []) as unknown as Job[]) {
-    await syncYouTubeForJob(job);
-  }
+  // Jobs module deprecated — no-op
 }
 
 export async function getYouTubeStats(): Promise<{
   total: number; in_production: number; published_this_month: number; paused: number;
 }> {
-  const { data } = await supabase.from('youtube_videos').select('id, status, created_at').eq('is_archived', false);
-  const rows = data || [];
-  const total = rows.length;
-  const in_production = rows.filter(r =>
-    ['idea', 'research', 'script', 'ready_to_record', 'recorded', 'editing', 'thumbnail', 'review'].includes(r.status as string)
-  ).length;
   const thisMonth = new Date().toISOString().slice(0, 7);
-  const published_this_month = rows.filter(r =>
-    r.status === 'published' && (r.created_at as string || '').startsWith(thisMonth)
-  ).length;
-  const paused = rows.filter(r => ['paused', 'discarded'].includes(r.status as string)).length;
-  return { total, in_production, published_this_month, paused };
+
+  const [totalRes, inProdRes, pubRes, pausedRes] = await Promise.all([
+    supabase.from('youtube_videos').select('*', { count: 'exact', head: true }).eq('is_archived', false),
+    supabase.from('youtube_videos').select('*', { count: 'exact', head: true }).in('status', ['idea', 'research', 'script', 'ready_to_record', 'recorded', 'editing', 'thumbnail', 'review']).eq('is_archived', false),
+    supabase.from('youtube_videos').select('*', { count: 'exact', head: true }).eq('status', 'published').gte('created_at', `${thisMonth}-01`).eq('is_archived', false),
+    supabase.from('youtube_videos').select('*', { count: 'exact', head: true }).in('status', ['paused', 'discarded']).eq('is_archived', false),
+  ]);
+
+  return {
+    total: totalRes.count ?? 0,
+    in_production: inProdRes.count ?? 0,
+    published_this_month: pubRes.count ?? 0,
+    paused: pausedRes.count ?? 0,
+  };
 }
 
 export async function seedDemoYouTube(): Promise<void> {

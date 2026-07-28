@@ -1,4 +1,6 @@
 import { supabase } from '../supabase';
+import { deleteAutomaticTasksForSource } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 import type { Job, MusicProject, MusicTrack } from '../types';
 
 export type MusicProjectWithExtras = MusicProject & {
@@ -213,6 +215,8 @@ export async function createMusicProject(data: Partial<MusicProject>): Promise<M
     job_id: data.job_id || null,
     client_id: data.client_id || null,
     source_type: data.source_type || 'personal',
+    amount: data.amount ?? null,
+    payment_status: data.payment_status || 'pending',
     title: data.title || 'Sin título',
     artist: data.artist || null,
     project_type: data.project_type || 'single',
@@ -238,7 +242,8 @@ export async function createMusicProject(data: Partial<MusicProject>): Promise<M
 }
 
 const MUSIC_PROJECT_EDITABLE: (keyof MusicProject)[] = [
-  'job_id', 'client_id', 'source_type', 'title', 'artist', 'project_type', 'status', 'priority',
+  'job_id', 'client_id', 'source_type', 'amount', 'payment_status',
+  'title', 'artist', 'project_type', 'status', 'priority',
   'start_date', 'target_date', 'total_tracks', 'bpm', 'key', 'musical_refs', 'client_observations',
   'stems_path', 'session_path', 'exports_path', 'notes',
 ];
@@ -265,6 +270,8 @@ export async function archiveMusicProject(id: string): Promise<void> {
 }
 
 export async function deleteMusicProject(id: string): Promise<void> {
+  await deleteAutomaticTasksForSource('music', id);
+  await deleteFinanceForSource('music', id);
   const { error: err1 } = await supabase.from('music_tracks').delete().eq('music_project_id', id);
   if (err1) throw new Error(`DB error: ${err1.message}`);
   const { error: err2 } = await supabase.from('music_projects').delete().eq('id', id);

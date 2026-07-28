@@ -14,12 +14,19 @@ export interface Client {
   status: 'prospect' | 'active' | 'inactive' | 'frequent' | 'archived';
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
+
+export type WorkType = 'personal' | 'paid';
+export type PaymentStatus = 'pending' | 'paid' | 'partial';
 
 export interface Reel {
   id: string;
   job_id: string | null;
+  work_type: WorkType;
+  client_id: string | null;
+  amount: number | null;
+  payment_status: PaymentStatus;
   title: string;
   idea: string | null;
   script: string | null;
@@ -40,7 +47,7 @@ export interface Reel {
   status: ReelStatus;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type ReelStatus =
@@ -58,6 +65,10 @@ export type ReelStatus =
 export interface YouTubeVideo {
   id: string;
   job_id: string | null;
+  work_type: WorkType;
+  client_id: string | null;
+  amount: number | null;
+  payment_status: PaymentStatus;
   provisional_title: string;
   final_title: string | null;
   idea: string | null;
@@ -81,7 +92,7 @@ export interface YouTubeVideo {
   status: YouTubeStatus;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type YouTubeStatus =
@@ -111,7 +122,7 @@ export interface Job {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type JobStatus =
@@ -127,6 +138,10 @@ export type JobStatus =
 
 export interface DigitalProject {
   id: string;
+  work_type: WorkType;
+  client_id: string | null;
+  amount: number | null;
+  payment_status: PaymentStatus;
   name: string;
   description: string | null;
   current_objective: string | null;
@@ -144,7 +159,7 @@ export interface DigitalProject {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type ProjectStatus =
@@ -164,6 +179,8 @@ export interface MusicProject {
   job_id: string | null;
   client_id: string | null;
   source_type: 'personal' | 'client_job';
+  amount: number | null;
+  payment_status: PaymentStatus;
   title: string;
   artist: string | null;
   project_type: 'single' | 'ep' | 'album' | 'beat' | 'mix' | 'mastering' | 'recording' | 'other';
@@ -182,7 +199,7 @@ export interface MusicProject {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type MusicProjectStatus =
@@ -220,7 +237,7 @@ export interface Task {
   source_type: string | null;
   source_id: string | null;
   rule_key: string | null;
-  auto_generated: number;
+  auto_generated: boolean;
   priority: 'low' | 'medium' | 'high' | 'urgent';
   status: TaskStatus;
   due_date: string | null;
@@ -229,11 +246,11 @@ export interface Task {
   tags: string | null;
   notes: string | null;
   parent_task_id: string | null;
-  is_recurring: number;
+  is_recurring: boolean;
   recurrence_rule: string | null;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
   subtask_count?: number;
 }
 
@@ -266,7 +283,7 @@ export interface Consultancy {
   status: ConsultancyStatus;
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
 }
 
 export type ConsultancyStatus =
@@ -367,7 +384,7 @@ export interface SocialMediaPost {
   published_at: string | null;
   facebook_post_id: string | null;
   sync_status: 'new' | 'unlinked' | 'linked' | 'ignored' | 'sync_error' | 'unsupported';
-  is_ignored: number;
+  is_ignored: boolean;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -380,7 +397,7 @@ export interface ReelSocialLink {
   platform: string;
   platform_media_id: string;
   linked_at: string;
-  linked_manually: number;
+  linked_manually: boolean;
   match_confidence: number | null;
   created_at: string;
   updated_at: string;
@@ -393,7 +410,7 @@ export interface YouTubeSocialLink {
   platform: string;
   platform_media_id: string;
   linked_at: string;
-  linked_manually: number;
+  linked_manually: boolean;
   match_confidence: number | null;
   created_at: string;
   updated_at: string;
@@ -561,7 +578,7 @@ export interface AgendaItem {
   tags: string | null; // comma-separated
   created_at: string;
   updated_at: string;
-  is_archived: number;
+  is_archived: boolean;
   client_name?: string;
   project_name?: string;
 }

@@ -207,31 +207,6 @@ function aggregateCounts(rows: any[], field: string): { status: string; count: n
   return Object.entries(map).map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count);
 }
 
-function aggregateTypeCounts(rows: any[], field: string): { type: string; count: number }[] {
-  return aggregateCounts(rows, field).map(({ status, count }) => ({ type: status, count }));
-}
-
-// ─── Jobs Report ───
-
-export interface JobsReport {
-  active: number; completed: number; by_type: { type: string; count: number }[];
-  by_status: { status: string; count: number }[];
-  avg_budget: number; total_revenue: number;
-}
-
-export async function getJobsReport(): Promise<JobsReport> {
-  const { data } = await supabase.from('jobs').select('type, status, budget').eq('is_archived', false);
-  const jobs = data || [];
-  const active = jobs.filter(j => !['delivered', 'cancelled', 'archived'].includes(j.status)).length;
-  const completedJobs = jobs.filter(j => j.status === 'delivered').length;
-  const by_type = aggregateTypeCounts(jobs, 'type');
-  const by_status = aggregateCounts(jobs, 'status');
-  const budgets = jobs.filter(j => j.budget != null).map(j => j.budget);
-  const avg_budget = budgets.length > 0 ? Math.round(budgets.reduce((a, b) => a + b, 0) / budgets.length) : 0;
-  const revenue = jobs.filter(j => j.status === 'delivered').reduce((sum, j) => sum + (j.budget || 0), 0);
-  return { active, completed: completedJobs, by_type, by_status, avg_budget, total_revenue: Math.round(revenue) };
-}
-
 // ─── Projects Report ───
 
 export interface ProjectsReport {

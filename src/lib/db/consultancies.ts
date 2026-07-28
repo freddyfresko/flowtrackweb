@@ -5,6 +5,7 @@ import {
   deleteAutomaticTasksForSource,
   syncAutomaticTasksForConsultancy,
 } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 
 export interface ConsultancyFilters {
   search?: string;
@@ -15,7 +16,6 @@ export interface ConsultancyFilters {
 export async function getConsultancies(
   filters: ConsultancyFilters = {}
 ): Promise<any[]> {
-  void backfillConsultanciesFromJobs();
 
   let q = supabase
     .from('consultancies')
@@ -189,61 +189,15 @@ export async function deleteConsultancy(id: string): Promise<void> {
   }
 
   await deleteAutomaticTasksForSource('consultancy', id);
+  await deleteFinanceForSource('consultancy', id);
 }
 
-export async function syncConsultancyForJob(
-  job: Job,
-  data: any = {}
-): Promise<void> {
-  const { data: existing } = await supabase
-    .from('consultancies')
-    .select('*')
-    .eq('job_id', job.id)
-    .maybeSingle();
-
-  const current = existing as any;
-
-  if (job.type !== 'consultancy' || job.status === 'cancelled' || job.is_archived) {
-    if (current) await archiveConsultancy(current.id);
-    return;
-  }
-
-  const payload = {
-    job_id: job.id,
-    client_id: job.client_id || null,
-    topic: data.topic || job.title,
-    objective: data.objective || job.description || null,
-    date: data.date || new Date().toISOString().slice(0, 10),
-    time: data.time || null,
-    duration: data.duration || 60,
-    contact_method: data.contact_method || null,
-    payment_status:
-      data.payment_status ||
-      (job.deposit && job.deposit > 0 ? 'partial' : 'pending'),
-    amount: data.amount || job.budget || null,
-    pre_notes: data.pre_notes || job.notes || 'Creado automáticamente desde Trabajos.',
-    status: data.status || 'requested',
-  };
-
-  if (current) await updateConsultancy(current.id, payload);
-  else await createConsultancy(payload);
+export async function syncConsultancyForJob(_job: Job, _data: any = {}): Promise<void> {
+  // Jobs module deprecated — no-op
 }
 
 export async function backfillConsultanciesFromJobs(): Promise<void> {
-  const { data: jobs, error } = await supabase
-    .from('jobs')
-    .select('*')
-    .eq('type', 'consultancy')
-    .eq('is_archived', false);
-
-  if (error) {
-    console.error('backfillConsultanciesFromJobs error:', error);
-    throw new Error(`DB error: ${error.message}`);
-  }
-
-  for (const job of jobs || []) {
-    await syncConsultancyForJob(job as Job);
-  }
+  // Jobs module deprecated — no-op
 }
 
 export async function getConsultancyStats(): Promise<{
@@ -252,7 +206,6 @@ export async function getConsultancyStats(): Promise<{
   pending_payment: number;
   completed_this_month: number;
 }> {
-  void backfillConsultanciesFromJobs();
 
   const now = new Date();
   const year = now.getFullYear();

@@ -1,6 +1,6 @@
 import { supabase } from '../supabase';
 import { localDateKey } from '../date';
-import { archiveAutomaticTasksForSource, syncAutomaticTasksForJob } from './automaticTasks';
+import { archiveAutomaticTasksForSource } from './automaticTasks';
 import type { Task } from '../types';
 
 export interface TaskFilters {
@@ -24,18 +24,6 @@ function nowStr(): string {
 }
 
 /** Coerce PG booleans back to 0/1 to match the Task TS type (which says `number`). */
-function coerceTaskRow(row: Record<string, unknown>): Task {
-  const out = { ...row };
-  for (const key of ['is_archived', 'auto_generated', 'is_recurring'] as const) {
-    if (typeof out[key] === 'boolean') out[key] = out[key] ? 1 : 0;
-  }
-  return out as unknown as Task;
-}
-
-function coerceTaskRows(rows: unknown[] | null): Task[] {
-  return ((rows as Record<string, unknown>[]) || []).map(coerceTaskRow);
-}
-
 const PRIORITY_SORT: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
 function sortTasks(a: Task, b: Task): number {
@@ -84,7 +72,7 @@ export async function getTasks(filters: TaskFilters = {}): Promise<Task[]> {
   const { data, error } = await q;
   if (error) throw new Error(`DB query error: ${error.message}`);
 
-  const tasks = coerceTaskRows(data);
+  const tasks = (data as unknown as Task[]);
 
   // Embed subtask counts via a single batch query
   const taskIds = tasks.map((t) => t.id);
@@ -117,7 +105,7 @@ export async function getTaskById(id: string): Promise<Task | null> {
     .maybeSingle();
 
   if (error) throw new Error(`DB query error: ${error.message}`);
-  return data ? coerceTaskRow(data as Record<string, unknown>) : null;
+  return data ? data as unknown as Task : null;
 }
 
 export async function getSubtasks(parentId: string): Promise<Task[]> {
@@ -129,7 +117,7 @@ export async function getSubtasks(parentId: string): Promise<Task[]> {
     .order('created_at', { ascending: true });
 
   if (error) throw new Error(`DB query error: ${error.message}`);
-  return coerceTaskRows(data);
+  return (data as unknown as Task[]);
 }
 
 export async function createTask(data: Partial<Task>): Promise<Task> {
@@ -165,7 +153,6 @@ export async function createTask(data: Partial<Task>): Promise<Task> {
   if (error) throw new Error(`DB insert error: ${error.message}`);
 
   const task = (await getTaskById(id))!;
-  if (task.job_id) await syncAutomaticTasksForJob(task as any);
   return task;
 }
 
@@ -202,7 +189,6 @@ export async function updateTask(id: string, data: Partial<Task>): Promise<Task 
   if (error) throw new Error(`DB update error: ${error.message}`);
 
   const task = await getTaskById(id);
-  if (task?.job_id) await syncAutomaticTasksForJob(task as any);
   return task;
 }
 

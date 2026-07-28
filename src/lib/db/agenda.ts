@@ -1,5 +1,5 @@
 import { supabase } from '../supabase';
-import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForAgenda } from './automaticTasks';
+import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource } from './automaticTasks';
 import { localDateKey } from '../date';
 import type { AgendaItem, AgendaReminder } from '../types';
 
@@ -25,7 +25,6 @@ function flattenAgendaItem(row: Record<string, unknown>): AgendaItem {
   item.project_name = undefined;
   delete item.clients;
   delete item.digital_projects;
-  // PG returns BOOLEAN but the type says `number` — coerce for backward compat
   if (typeof item.is_archived === 'boolean') {
     item.is_archived = item.is_archived ? 1 : 0;
   }
@@ -120,8 +119,6 @@ export async function createAgendaItem(data: Partial<AgendaItem>): Promise<strin
 
   if (error) throw new Error(`DB insert error: ${error.message}`);
 
-  const item = await getAgendaItemRaw(id);
-  if (item) await syncAutomaticTasksForAgenda(item);
   return id;
 }
 
@@ -149,9 +146,6 @@ export async function updateAgendaItem(id: string, data: Partial<AgendaItem>): P
     .eq('id', id);
 
   if (error) throw new Error(`DB update error: ${error.message}`);
-
-  const item = await getAgendaItemRaw(id);
-  if (item) await syncAutomaticTasksForAgenda(item);
 }
 
 export async function archiveAgendaItem(id: string): Promise<void> {

@@ -1,10 +1,53 @@
 import { supabase } from '../supabase';
 import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForClient } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 import type { Client } from '../types';
 
 export interface ClientFilters {
   search?: string;
   status?: string;
+}
+
+async function fallbackGetClients(filters: ClientFilters = {}, limit?: number, offset?: number): Promise<Client[]> {
+  let q = supabase
+    .from('clients')
+    .select('*')
+    .eq('is_archived', false);
+
+  if (filters.status) q = q.eq('status', filters.status);
+  if (filters.search) {
+    const s = filters.search.replace(/%/g, '');
+    q = q.or(`name.ilike.%${s}%,artist_name.ilike.%${s}%,company.ilike.%${s}%,email.ilike.%${s}%,phone.ilike.%${s}%`);
+  }
+  if (limit !== undefined && offset !== undefined) q = q.range(offset, offset + limit - 1);
+  q = q.order('name', { ascending: true });
+
+  const { data, error } = await q;
+  if (error) throw new Error(`DB query error: \${error.message}`);
+
+  const clients = (data || []) as Client[];
+  if (clients.length === 0) return [];
+
+  const clientIds = clients.map((c) => c.id);
+  const [jobResult, conResult, recResult] = await Promise.all([
+    supabase.from('jobs').select('client_id').in('client_id', clientIds).eq('is_archived', false),
+    supabase.from('consultancies').select('client_id').in('client_id', clientIds).eq('is_archived', false),
+    supabase.from('receivables').select('client_id, balance').in('client_id', clientIds).in('status', ['pending', 'partial', 'overdue']),
+  ]);
+
+  const jobCountMap = new Map<string, number>();
+  for (const j of jobResult.data || []) jobCountMap.set(j.client_id, (jobCountMap.get(j.client_id) || 0) + 1);
+  const conCountMap = new Map<string, number>();
+  for (const c of conResult.data || []) conCountMap.set(c.client_id, (conCountMap.get(c.client_id) || 0) + 1);
+  const debtMap = new Map<string, number>();
+  for (const r of recResult.data || []) debtMap.set(r.client_id, (debtMap.get(r.client_id) || 0) + Number(r.balance || 0));
+
+  return clients.map((client) => ({
+    ...client,
+    job_count: jobCountMap.get(client.id) || 0,
+    consultancy_count: conCountMap.get(client.id) || 0,
+    total_debt: debtMap.get(client.id) || 0,
+  })) as (Client & { job_count: number; consultancy_count: number; total_debt: number })[];
 }
 
 export async function getClients(filters: ClientFilters = {}, limit?: number, offset?: number): Promise<Client[]> {
@@ -29,59 +72,19 @@ export async function getClients(filters: ClientFilters = {}, limit?: number, of
 
   q = q.order('name', { ascending: true });
 
-  const { data, error } = await q;
-  if (error) throw new Error(`DB query error: ${error.message}`);
+  // Use RPC: single query with LEFT JOINs
+  const { data, error } = await supabase.rpc('get_clients_with_counts', {
+    p_search: filters.search || null,
+    p_status: filters.status || null,
+  });
 
-  const clients = (data || []) as Client[];
-
-  if (clients.length === 0) return [];
-
-  // Attach subquery data (job_count, consultancy_count, total_debt) in JS
-  const clientIds = clients.map((c) => c.id);
-
-  const [jobResult, conResult, recResult] = await Promise.all([
-    supabase
-      .from('jobs')
-      .select('client_id')
-      .in('client_id', clientIds)
-      .eq('is_archived', false),
-    supabase
-      .from('consultancies')
-      .select('client_id')
-      .in('client_id', clientIds)
-      .eq('is_archived', false),
-    supabase
-      .from('receivables')
-      .select('client_id, balance')
-      .in('client_id', clientIds)
-      .in('status', ['pending', 'partial', 'overdue']),
-  ]);
-
-  if (jobResult.error) throw new Error(`DB query error: ${jobResult.error.message}`);
-  if (conResult.error) throw new Error(`DB query error: ${conResult.error.message}`);
-  if (recResult.error) throw new Error(`DB query error: ${recResult.error.message}`);
-
-  const jobCountMap = new Map<string, number>();
-  for (const j of jobResult.data || []) {
-    jobCountMap.set(j.client_id, (jobCountMap.get(j.client_id) || 0) + 1);
+  if (error) {
+    // Fallback: Native query with JS aggregation if RPC not deployed yet
+    console.warn('[clients] RPC not available, using fallback:', error.message);
+    return fallbackGetClients(filters, limit, offset);
   }
 
-  const conCountMap = new Map<string, number>();
-  for (const c of conResult.data || []) {
-    conCountMap.set(c.client_id, (conCountMap.get(c.client_id) || 0) + 1);
-  }
-
-  const debtMap = new Map<string, number>();
-  for (const r of recResult.data || []) {
-    debtMap.set(r.client_id, (debtMap.get(r.client_id) || 0) + Number(r.balance || 0));
-  }
-
-  return clients.map((client) => ({
-    ...client,
-    job_count: jobCountMap.get(client.id) || 0,
-    consultancy_count: conCountMap.get(client.id) || 0,
-    total_debt: debtMap.get(client.id) || 0,
-  })) as (Client & { job_count: number; consultancy_count: number; total_debt: number })[];
+  return (data || []) as unknown as (Client & { job_count: number; consultancy_count: number; total_debt: number })[];
 }
 
 export async function getClientById(id: string): Promise<Client | null> {
@@ -209,6 +212,7 @@ export async function deleteClient(id: string): Promise<void> {
   if (err7) throw new Error(`DB delete client error: ${err7.message}`);
 
   await deleteAutomaticTasksForSource('client', id);
+  await deleteFinanceForSource('client', id);
 }
 
 export async function getClientStats(): Promise<{ total: number; active: number; with_debt: number }> {

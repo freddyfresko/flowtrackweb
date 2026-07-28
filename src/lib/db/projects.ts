@@ -1,5 +1,6 @@
 import { supabase } from '../supabase';
 import { archiveAutomaticTasksForSource, deleteAutomaticTasksForSource, syncAutomaticTasksForProject } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 import type { DigitalProject } from '../types';
 
 // ─── Helpers ───
@@ -10,12 +11,6 @@ function nowStr(): string {
 
 function todayStr(): string {
   return nowStr().slice(0, 10);
-}
-
-function coerceProjectRow(row: Record<string, unknown>): DigitalProject {
-  const out = { ...row };
-  if (typeof out.is_archived === 'boolean') out.is_archived = out.is_archived ? 1 : 0;
-  return out as unknown as DigitalProject;
 }
 
 function daysInactive(lastActivity: string | null): number | undefined {
@@ -62,7 +57,7 @@ export async function getProjects(): Promise<(DigitalProject & { task_count?: nu
 
   if (error) throw new Error(`DB query error: ${error.message}`);
 
-  const projects = ((data as Record<string, unknown>[]) || []).map(coerceProjectRow);
+  const projects = (data || []) as DigitalProject[];
   const projectIds = projects.map((p) => p.id);
 
   const taskCounts = new Map<string, number>();
@@ -98,7 +93,7 @@ export async function getProjectById(id: string): Promise<any | null> {
   if (error) throw new Error(`DB query error: ${error.message}`);
   if (!data) return null;
 
-  const project = coerceProjectRow(data as Record<string, unknown>);
+  const project = data as unknown as DigitalProject;
   const { data: tasks, error: taskError } = await supabase
     .from('tasks')
     .select('status')
@@ -123,6 +118,10 @@ export async function createProject(data: Partial<DigitalProject>): Promise<any>
 
   const { error } = await supabase.from('digital_projects').insert({
     id,
+    work_type: data.work_type || 'personal',
+    client_id: data.client_id ?? null,
+    amount: data.amount ?? null,
+    payment_status: data.payment_status || 'pending',
     name: data.name || 'Sin nombre',
     description: data.description ?? null,
     current_objective: data.current_objective ?? null,
@@ -153,6 +152,7 @@ export async function createProject(data: Partial<DigitalProject>): Promise<any>
 export async function updateProject(id: string, data: any): Promise<any | null> {
   const updateData: Record<string, unknown> = {};
   const allowed: (keyof DigitalProject)[] = [
+    'work_type', 'client_id', 'amount', 'payment_status',
     'name', 'description', 'current_objective', 'status', 'priority', 'progress',
     'start_date', 'target_date', 'next_step', 'local_folder', 'repository', 'url', 'technologies', 'notes',
   ];
@@ -201,6 +201,7 @@ export async function deleteProject(id: string): Promise<void> {
     if (result.error) throw new Error(`DB delete error: ${result.error.message}`);
   }
   await deleteAutomaticTasksForSource('project', id);
+  await deleteFinanceForSource('project', id);
 }
 
 // ─── Prompts ───
