@@ -4,6 +4,7 @@ import { useDataStore } from '../lib/stores/dataStore';
 import { formatCurrency, formatNumber } from '../lib/utils/format';
 import { localDateKey } from '../lib/date';
 import { Skeleton, SkeletonCard, EmptyState, ErrorState, PriorityDot } from '../components/ui';
+import { usePullToRefresh, PullToRefreshIndicator } from '../hooks/usePullToRefresh';
 
 const MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
@@ -46,6 +47,8 @@ export function DashboardPage() {
     setRefreshing(false);
   }, [reload]);
 
+  const pull = usePullToRefresh(handleRefresh);
+
   if (status === 'loading' && !d) {
     return (
       <div className="p-3 space-y-3">
@@ -72,7 +75,7 @@ export function DashboardPage() {
     );
   }
 
-  const { taskStats, financeStats, jobStats, reelStats, youTubeStats, projectStat, musicStats, social, alerts, todayTasks, overdueTasks, agendaItems, consultancies } = d;
+  const { taskStats, financeStats, jobStats, reelStats, youTubeStats, projectStat, musicStats, videoclipStats, social, alerts, todayTasks, overdueTasks, agendaItems, consultancies } = d;
   const monthName = MONTHS[new Date().getMonth()];
   const todayStr = localDateKey(new Date());
 
@@ -84,7 +87,9 @@ export function DashboardPage() {
     .slice(0, 4);
 
   return (
-    <div className="p-3 pb-4 space-y-3">
+    <div className="p-3 pb-4 space-y-3 relative">
+      {/* Pull-to-refresh indicator */}
+      <PullToRefreshIndicator {...pull} />
 
       {/* Header */}
       <div className="flex items-center justify-between stagger-item">
@@ -153,7 +158,11 @@ export function DashboardPage() {
             </div>
             <div>
               <p className="opacity-70">Vencido</p>
-              <p className="font-semibold text-red-100">{formatCurrency(financeStats.overdue_receivables || 0)}</p>
+              {(financeStats.overdue_receivables || 0) > 0 ? (
+                <p className="font-semibold text-red-300">{formatCurrency(financeStats.overdue_receivables || 0)}</p>
+              ) : (
+                <p className="font-semibold text-red-100">$0</p>
+              )}
             </div>
             <div>
               <p className="opacity-70">Cotiz.</p>
@@ -169,7 +178,7 @@ export function DashboardPage() {
         <div className="relative">
           <p className="text-[11px] font-medium opacity-80">En producción</p>
           <p className="text-2xl font-bold mt-0.5 tracking-tight">{inProduction}</p>
-          <p className="text-[10px] mt-1 opacity-70">{reelStats.in_production || 0} reels · {youTubeStats.in_production || 0} videos</p>
+          <p className="text-[10px] mt-1 opacity-70">{reelStats.in_production || 0} reels · {youTubeStats.in_production || 0} videos · {videoclipStats?.active || 0} videoclips</p>
           <div className="mt-3 pt-3 border-t border-white/20 grid grid-cols-3 gap-2 text-[10px]">
             <div>
               <p className="opacity-70">Proyectos</p>

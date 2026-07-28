@@ -7,6 +7,7 @@ import { initRuntimeConfig } from './lib/supabase';
 import { testConnection } from './lib/db';
 import { MobileLayout } from './components/MobileLayout';
 import { SplashScreen } from './components/SplashScreen';
+import { Onboarding, hasOnboarded } from './components/Onboarding';
 
 // Eager — Dashboard is the first thing users see, keep it in main bundle
 import { DashboardPage } from './pages/DashboardPage';
@@ -44,6 +45,7 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState<'loading' | 'ok' | 'error'>('loading');
   const [dbError, setDbError] = useState('');
   const [showSplash, setShowSplash] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     initTheme();
@@ -74,8 +76,14 @@ export default function App() {
               dbStatus={dbStatus}
               dbError={dbError}
               ready={ready}
-              onEnter={() => setShowSplash(false)}
+              onEnter={() => {
+                setShowSplash(false);
+                // Mostrar onboarding si es primera visita
+                if (!hasOnboarded()) setShowOnboarding(true);
+              }}
             />
+          ) : showOnboarding ? (
+            <Onboarding onDone={() => setShowOnboarding(false)} />
           ) : (
             <MobileLayout />
           )

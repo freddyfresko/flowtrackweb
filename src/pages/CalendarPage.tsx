@@ -68,6 +68,8 @@ export function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState<number>(today.getDate());
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'month' | 'week'>('month');
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
 
   // Carga eventos del mes cuando cambian año/mes
   useEffect(() => {
@@ -107,12 +109,24 @@ export function CalendarPage() {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-[var(--color-bg)] px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)]">
         <h1 className="text-base font-bold text-[var(--color-text)]">📅 Calendario</h1>
-        <button
-          onClick={goToday}
-          className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)] active:scale-95 transition cursor-pointer"
-        >
-          Hoy
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setViewMode(viewMode === 'month' ? 'week' : 'month')}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition active:scale-95 cursor-pointer ${
+              viewMode === 'week'
+                ? 'bg-[var(--color-primary)] text-[var(--color-text-on-accent)]'
+                : 'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-secondary)]'
+            }`}
+          >
+            {viewMode === 'month' ? 'Semana' : 'Mes'}
+          </button>
+          <button
+            onClick={goToday}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)] active:scale-95 transition cursor-pointer"
+          >
+            Hoy
+          </button>
+        </div>
       </div>
 
       {/* Navegación mes */}
@@ -133,66 +147,109 @@ export function CalendarPage() {
         >→</button>
       </div>
 
-      {/* Grid calendario — semana empieza Lunes */}
+      {/* Calendario grid — mes o semana */}
       <div className="px-3">
         <div className="grid grid-cols-7 gap-0.5 mb-1">
           {DAYS.map((d, i) => (
-            <div
-              key={i}
-              className="text-center text-[10px] font-semibold text-[var(--color-text-tertiary)] py-1"
-            >
+            <div key={i} className="text-center text-[10px] font-semibold text-[var(--color-text-tertiary)] py-1">
               {d}
             </div>
           ))}
         </div>
 
         <div className="grid grid-cols-7 gap-0.5">
-          {/* Huecos del mes anterior */}
-          {Array.from({ length: mondayOffset }).map((_, i) => (
-            <div key={`e-${i}`} className="aspect-square rounded-lg bg-transparent" />
-          ))}
-
-          {/* Días del mes */}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const day = i + 1;
-            const evs = dayEvents(day);
-            const isToday = dateKey(day) === todayStr;
-            const isSelected = selectedDay === day;
-            return (
-              <button
-                key={day}
-                onClick={() => setSelectedDay(day)}
-                className={`aspect-square rounded-lg flex flex-col items-center justify-start pt-1 transition-all cursor-pointer relative ${
-                  isSelected
-                    ? 'bg-[var(--color-primary)]/15 ring-1 ring-[var(--color-primary)]'
-                    : 'bg-[var(--color-surface)] active:scale-95'
-                }`}
-              >
-                <span className={`text-[11px] font-medium ${
-                  isToday
-                    ? 'bg-[var(--color-primary)] text-white rounded-full w-5 h-5 flex items-center justify-center'
-                    : isSelected
-                      ? 'text-[var(--color-primary)] font-semibold'
-                      : 'text-[var(--color-text-secondary)]'
-                }`}>
-                  {day}
-                </span>
-                {evs.length > 0 && (
-                  <div className="absolute bottom-1 flex gap-0.5 flex-wrap justify-center max-w-[80%]">
-                    {evs.slice(0, 3).map((e) => (
-                      <span
-                        key={e.id}
-                        className={`w-1 h-1 rounded-full ${TYPE_DOT[e.type] || 'bg-gray-400'}`}
-                      />
-                    ))}
-                    {evs.length > 3 && (
-                      <span className="text-[7px] text-[var(--color-text-tertiary)]">+{evs.length - 3}</span>
+          {viewMode === 'month' ? (
+            /* ─── Vista MES ─── */
+            <>
+              {Array.from({ length: mondayOffset }).map((_, i) => (
+                <div key={`e-${i}`} className="aspect-square rounded-lg bg-transparent" />
+              ))}
+              {Array.from({ length: daysInMonth }).map((_, i) => {
+                const day = i + 1;
+                const evs = dayEvents(day);
+                const isToday = dateKey(day) === todayStr;
+                const isSelected = selectedDay === day;
+                return (
+                  <button
+                    key={day}
+                    onClick={() => setSelectedDay(day)}
+                    className={`aspect-square rounded-lg flex flex-col items-center justify-start pt-1 transition-all cursor-pointer relative ${
+                      isSelected
+                        ? 'bg-[var(--color-primary)]/15 ring-1 ring-[var(--color-primary)]'
+                        : 'bg-[var(--color-surface)] active:scale-95'
+                    }`}
+                  >
+                    <span className={`text-[11px] font-medium ${
+                      isToday
+                        ? 'bg-[var(--color-primary)] text-white rounded-full w-5 h-5 flex items-center justify-center'
+                        : isSelected
+                          ? 'text-[var(--color-primary)] font-semibold'
+                          : 'text-[var(--color-text-secondary)]'
+                    }`}>
+                      {day}
+                    </span>
+                    {evs.length > 0 && (
+                      <div className="absolute bottom-1 flex gap-0.5 flex-wrap justify-center max-w-[80%]">
+                        {evs.slice(0, 3).map((e) => (
+                          <span key={e.id} className={`w-1 h-1 rounded-full ${TYPE_DOT[e.type] || 'bg-gray-400'}`} />
+                        ))}
+                        {evs.length > 3 && (
+                          <span className="text-[7px] text-[var(--color-text-tertiary)]">+{evs.length - 3}</span>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-              </button>
-            );
-          })}
+                  </button>
+                );
+              })}
+            </>
+          ) : (
+            /* ─── Vista SEMANA ─── */
+            (() => {
+              // Calcular el Lunes de la semana del día seleccionado
+              const selectedDate = new Date(year, month - 1, selectedDay);
+              const dayOfWeek = (selectedDate.getDay() + 6) % 7; // 0=Lun
+              const weekStart = selectedDay - dayOfWeek;
+              const weekDays = Array.from({ length: 7 }, (_, i) => weekStart + i);
+              return weekDays.map((day) => {
+                const valid = day >= 1 && day <= daysInMonth;
+                const evs = valid ? dayEvents(day) : [];
+                const isToday = valid && dateKey(day) === todayStr;
+                const isSelected = selectedDay === day;
+                return (
+                  <button
+                    key={day}
+                    onClick={() => valid && setSelectedDay(day)}
+                    className={`rounded-lg flex flex-col items-center pt-1 transition-all cursor-pointer min-h-[48px] ${
+                      isSelected
+                        ? 'bg-[var(--color-primary)]/15 ring-1 ring-[var(--color-primary)]'
+                        : valid ? 'bg-[var(--color-surface)] active:scale-95' : 'bg-transparent'
+                    }`}
+                  >
+                    <span className={`text-[11px] font-medium ${
+                      !valid ? 'text-[var(--color-text-disabled)]' :
+                      isToday
+                        ? 'bg-[var(--color-primary)] text-white rounded-full w-5 h-5 flex items-center justify-center'
+                        : isSelected
+                          ? 'text-[var(--color-primary)] font-semibold'
+                          : 'text-[var(--color-text-secondary)]'
+                    }`}>
+                      {valid ? day : ''}
+                    </span>
+                    {evs.length > 0 && (
+                      <div className="mt-0.5 flex flex-col items-center gap-0.5">
+                        {evs.slice(0, 2).map((e) => (
+                          <span key={e.id} className={`w-1 h-1 rounded-full ${TYPE_DOT[e.type] || 'bg-gray-400'}`} />
+                        ))}
+                        {evs.length > 2 && (
+                          <span className="text-[7px] text-[var(--color-text-tertiary)]">+{evs.length - 2}</span>
+                        )}
+                      </div>
+                    )}
+                  </button>
+                );
+              });
+            })()
+          )}
         </div>
       </div>
 
@@ -223,7 +280,8 @@ export function CalendarPage() {
             {selectedEvents.map((e) => (
               <div
                 key={e.id}
-                className={`flex items-start gap-2 px-3 py-2 rounded-xl border-l-2 ${TYPE_BORDER[e.type] || 'border-l-gray-500 bg-gray-500/10'}`}
+                onClick={() => setSelectedEvent(e)}
+                className={`flex items-start gap-2 px-3 py-2 rounded-xl border-l-2 cursor-pointer active:scale-[0.98] transition ${TYPE_BORDER[e.type] || 'border-l-gray-500 bg-gray-500/10'}`}
               >
                 <span className="text-sm flex-shrink-0">{TYPE_ICON[e.type] || '•'}</span>
                 <div className="flex-1 min-w-0">
@@ -260,6 +318,39 @@ export function CalendarPage() {
           ))}
         </div>
       </div>
+
+      {/* Event detail popup */}
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center" onClick={() => setSelectedEvent(null)}>
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm animate-fade-in" />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 w-full max-w-sm mx-3 rounded-2xl bg-[var(--color-surface)] border border-[var(--color-border)] p-4 pb-5 animate-pop-in"
+          >
+            <div className="flex items-start gap-3">
+              <span className="text-2xl flex-shrink-0">{TYPE_ICON[selectedEvent.type] || '•'}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-[var(--color-text)]">{selectedEvent.title}</p>
+                <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+                  {selectedEvent.date}
+                  {selectedEvent.client_name ? ` · ${selectedEvent.client_name}` : ''}
+                </p>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${TYPE_DOT[selectedEvent.type] || 'bg-gray-400'}`} />
+              <span className="text-[11px] font-medium text-[var(--color-text-secondary)] capitalize">{selectedEvent.type}</span>
+              {selectedEvent.status && (
+                <span className="text-[11px] text-[var(--color-text-tertiary)]">· {selectedEvent.status}</span>
+              )}
+            </div>
+            <button
+              onClick={() => setSelectedEvent(null)}
+              className="mt-4 w-full py-2 rounded-xl bg-[var(--color-surface-hover)] text-xs text-[var(--color-text-secondary)] font-medium active:scale-[0.98] transition cursor-pointer"
+            >Cerrar</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

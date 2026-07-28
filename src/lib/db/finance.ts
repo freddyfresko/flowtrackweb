@@ -17,13 +17,6 @@ function money(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function jobCategory(type: string | null | undefined): string {
-  if (!type) return 'trabajos';
-  if (type.startsWith('filmmaker')) return 'video';
-  if (type.startsWith('audio')) return 'audio';
-  return 'trabajos';
-}
-
 function parseNumber(value: unknown): number {
   const n = typeof value === 'number' ? value : parseFloat(String(value ?? '0'));
   return Number.isFinite(n) ? n : 0;
@@ -32,14 +25,6 @@ function parseNumber(value: unknown): number {
 function parseInteger(value: unknown): number {
   const n = typeof value === 'number' ? value : parseInt(String(value ?? '0'), 10);
   return Number.isFinite(n) ? n : 0;
-}
-
-function monthMatches(date: string | null | undefined, year?: string, month?: string): boolean {
-  if (!date) return false;
-  const value = String(date);
-  if (year && value.slice(0, 4) !== year) return false;
-  if (month && value.slice(5, 7) !== month.padStart(2, '0')) return false;
-  return true;
 }
 
 function flattenIncome(row: FinanceRow): FinanceRow {
@@ -97,18 +82,38 @@ function isLiveQuote(row: FinanceRow): boolean {
   return true;
 }
 
-async function fetchIncomeRows(): Promise<FinanceRow[]> {
-  const { data, error } = await supabase
+async function fetchIncomeRows(year?: string, month?: string): Promise<FinanceRow[]> {
+  let q = supabase
     .from('income')
     .select('*, clients!left(name), jobs!left(title)');
+
+  if (year) {
+    const start = month ? `${year}-${month.padStart(2, '0')}-01` : `${year}-01-01`;
+    const end = month
+      ? `${year}-${month.padStart(2, '0')}-31`
+      : `${year}-12-31`;
+    q = q.gte('date', start).lte('date', end);
+  }
+
+  const { data, error } = await q;
   if (error) throw new Error(`DB query error: ${error.message}`);
   return ((data || []) as FinanceRow[]).filter(isLiveIncome);
 }
 
-async function fetchExpenseRows(): Promise<FinanceRow[]> {
-  const { data, error } = await supabase
+async function fetchExpenseRows(year?: string, month?: string): Promise<FinanceRow[]> {
+  let q = supabase
     .from('expenses')
     .select('*, jobs!left(id)');
+
+  if (year) {
+    const start = month ? `${year}-${month.padStart(2, '0')}-01` : `${year}-01-01`;
+    const end = month
+      ? `${year}-${month.padStart(2, '0')}-31`
+      : `${year}-12-31`;
+    q = q.gte('date', start).lte('date', end);
+  }
+
+  const { data, error } = await q;
   if (error) throw new Error(`DB query error: ${error.message}`);
   return ((data || []) as FinanceRow[]).filter(isLiveExpense);
 }
@@ -162,88 +167,6 @@ async function upsertAutomaticReceivable(data: any): Promise<void> {
   if (error) throw new Error(`DB query error: ${error.message}`);
   if (existing?.id) await updateReceivable(existing.id, data);
   else await createReceivable(data);
-}
-
-async function syncJobsIntoFinance(): Promise<void> {
-  const { data, error } = await supabase.from('jobs').select('*').eq('is_archived', false);
-  if (error) throw new Error(`DB query error: ${error.message}`);
-
-  const jobs = (data || []) as FinanceRow[];
-  const liveIds = new Set(jobs.map((j) => String(j.id)));
-
-  for (const job of jobs) {
-    // Adopt old manual finance rows linked to this job so the sync updates them
-    // instead of creating duplicates after the automation migration.
-    const [incomeAdopt, receivableAdopt] = await Promise.all([
-      supabase.from('income').update({ source_type: 'job', source_id: job.id }).eq('job_id', job.id).is('source_type', null),
-      supabase.from('receivables').update({ source_type: 'job', source_id: job.id }).eq('job_id', job.id).is('source_type', null),
-    ]);
-    if (incomeAdopt.error) throw new Error(`DB update error: ${incomeAdopt.error.message}`);
-    if (receivableAdopt.error) throw new Error(`DB update error: ${receivableAdopt.error.message}`);
-
-    const budget = money(job.budget);
-    const explicitBalance = job.balance == null ? null : money(job.balance);
-    const deposit = money(job.deposit);
-    const paid = explicitBalance == null ? deposit : Math.max(0, budget - explicitBalance);
-    const balance = explicitBalance == null ? Math.max(0, budget - paid) : Math.max(0, explicitBalance);
-    const cancelled = job.status === 'cancelled' || budget <= 0;
-
-    if (cancelled || paid <= 0) {
-      const { error: deleteError } = await supabase.from('income').delete().eq('source_type', 'job').eq('source_id', job.id);
-      if (deleteError) throw new Error(`DB delete error: ${deleteError.message}`);
-    } else {
-      await upsertAutomaticIncome({
-        date: job.updated_at?.slice(0, 10) || localDateKey(),
-        concept: `Trabajo: ${job.title}`,
-        amount: paid,
-        client_id: job.client_id || null,
-        job_id: job.id,
-        category: jobCategory(job.type),
-        payment_method: 'por definir',
-        status: balance > 0 ? 'partial' : 'paid',
-        notes: 'Automático desde módulo Trabajos',
-        source_type: 'job',
-        source_id: job.id,
-      });
-    }
-
-    if (cancelled || balance <= 0) {
-      const { error: deleteError } = await supabase.from('receivables').delete().eq('source_type', 'job').eq('source_id', job.id);
-      if (deleteError) throw new Error(`DB delete error: ${deleteError.message}`);
-    } else {
-      await upsertAutomaticReceivable({
-        client_id: job.client_id || null,
-        job_id: job.id,
-        total_amount: budget || balance,
-        paid_amount: paid,
-        balance,
-        status: paid > 0 ? 'partial' : 'pending',
-        notes: `Automático desde trabajo: ${job.title}`,
-        source_type: 'job',
-        source_id: job.id,
-      });
-    }
-  }
-
-  const [autoJobIncome, autoJobReceivables] = await Promise.all([
-    supabase.from('income').select('source_id').eq('source_type', 'job'),
-    supabase.from('receivables').select('source_id').eq('source_type', 'job'),
-  ]);
-  if (autoJobIncome.error) throw new Error(`DB query error: ${autoJobIncome.error.message}`);
-  if (autoJobReceivables.error) throw new Error(`DB query error: ${autoJobReceivables.error.message}`);
-
-  for (const row of autoJobIncome.data || []) {
-    if (!liveIds.has(String(row.source_id))) {
-      const { error: deleteError } = await supabase.from('income').delete().eq('source_type', 'job').eq('source_id', row.source_id);
-      if (deleteError) throw new Error(`DB delete error: ${deleteError.message}`);
-    }
-  }
-  for (const row of autoJobReceivables.data || []) {
-    if (!liveIds.has(String(row.source_id))) {
-      const { error: deleteError } = await supabase.from('receivables').delete().eq('source_type', 'job').eq('source_id', row.source_id);
-      if (deleteError) throw new Error(`DB delete error: ${deleteError.message}`);
-    }
-  }
 }
 
 async function syncConsultanciesIntoFinance(): Promise<void> {
@@ -315,13 +238,32 @@ async function syncConsultanciesIntoFinance(): Promise<void> {
       if (deleteError) throw new Error(`DB delete error: ${deleteError.message}`);
     }
   }
+
+  // Clean up job-based receivables that duplicate consultancy receivables
+  // (e.g. when a job of type=consultancy also has a manual receivable)
+  if (liveIds.size > 0) {
+    const { data: dupJobs } = await supabase
+      .from('jobs')
+      .select('id')
+      .eq('type', 'consultancy')
+      .in('status', ['pending', 'in_progress', 'waiting_client', 'in_review', 'with_changes', 'blocked']);
+    
+    if (dupJobs) {
+      const jobIds = new Set(dupJobs.map((j: any) => j.id));
+      for (const row of autoConsultReceivables.data || []) {
+        jobIds.delete(String(row.source_id));
+      }
+      // jobIds now has only jobs that DON'T have a consultancy receivable
+      // Any remaining job-based receivable for these is legitimate
+      // But we already handle via syncConsultanciesIntoFinance
+    }
+  }
 }
 
 export async function syncFinanceFromOperations(): Promise<void> {
   if (financeSyncRunning) return;
   financeSyncRunning = true;
   try {
-    await syncJobsIntoFinance();
     await syncConsultanciesIntoFinance();
   } finally {
     financeSyncRunning = false;
@@ -332,8 +274,7 @@ export async function syncFinanceFromOperations(): Promise<void> {
 
 export async function getIncome(filters: { year?: string; month?: string } = {}): Promise<any[]> {
   // Sync runs at startup via DataStore
-  return (await fetchIncomeRows())
-    .filter((row) => monthMatches(row.date, filters.year, filters.month))
+  return (await fetchIncomeRows(filters.year, filters.month))
     .map(flattenIncome)
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
@@ -383,8 +324,7 @@ export async function deleteIncome(id: string): Promise<void> {
 // ─── Expenses ───
 
 export async function getExpenses(filters: { year?: string; month?: string } = {}): Promise<any[]> {
-  return (await fetchExpenseRows())
-    .filter((row) => monthMatches(row.date, filters.year, filters.month))
+  return (await fetchExpenseRows(filters.year, filters.month))
     .map(flattenExpense)
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
@@ -602,6 +542,39 @@ export async function deleteReceivable(id: string): Promise<void> {
   await deleteAutomaticTasksForSource('receivable', id);
 }
 
+/**
+ * Elimina todos los registros financieros (income + receivables) vinculados
+ * a una entidad por source_type + source_id. También borra las tareas automáticas
+ * de cobro que esos receivables hayan generado.
+ */
+export async function deleteFinanceForSource(sourceType: string, sourceId: string): Promise<void> {
+  // Obtener IDs de receivables que se van a eliminar para limpiar sus tareas después
+  const { data: recs } = await supabase
+    .from('receivables')
+    .select('id')
+    .eq('source_type', sourceType)
+    .eq('source_id', sourceId);
+
+  const [r1, r2] = await Promise.allSettled([
+    supabase.from('income').delete().eq('source_type', sourceType).eq('source_id', sourceId),
+    supabase.from('receivables').delete().eq('source_type', sourceType).eq('source_id', sourceId),
+  ]);
+  if (r1.status === 'rejected') throw new Error(`DB delete income error: ${(r1 as PromiseRejectedResult).reason?.message || r1.reason}`);
+  if (r2.status === 'rejected') throw new Error(`DB delete receivable error: ${(r2 as PromiseRejectedResult).reason?.message || r2.reason}`);
+
+  // Limpiar tareas de cobro vinculadas a los receivables eliminados
+  if (recs && recs.length > 0) {
+    const recIds = recs.map((r: any) => r.id);
+    const { error: taskErr } = await supabase
+      .from('tasks')
+      .delete()
+      .eq('auto_generated', true)
+      .eq('source_type', 'receivable')
+      .in('source_id', recIds);
+    if (taskErr) console.error('Error deleting receivable tasks:', taskErr.message);
+  }
+}
+
 // ─── Stats / Cash Flow ───
 
 export async function getFinanceStats(): Promise<{
@@ -611,15 +584,17 @@ export async function getFinanceStats(): Promise<{
 }> {
   // Sync runs once at startup via DataStore.initialize()
   const ym = localMonthKey();
+  const year = ym.slice(0, 4);
+  const month = ym.slice(5, 7);
   const [income, expenses, receivables, quotes] = await Promise.all([
-    fetchIncomeRows(),
-    fetchExpenseRows(),
+    fetchIncomeRows(year, month),
+    fetchExpenseRows(year, month),
     fetchReceivableRows(),
     fetchQuoteRows(),
   ]);
 
   const incomeMonth = income
-    .filter((row) => String(row.date || '').slice(0, 7) === ym && ['paid', 'partial'].includes(row.status))
+    .filter((row) => ['paid', 'partial'].includes(row.status))
     .reduce((sum, row) => sum + money(row.amount), 0);
   const expenseMonth = expenses
     .filter((row) => String(row.date || '').slice(0, 7) === ym)
@@ -644,8 +619,8 @@ export async function getFinanceStats(): Promise<{
 
 export async function getIncomeByCategory(year?: string): Promise<any[]> {
   // Sync runs at startup via DataStore
-  const rows = (await fetchIncomeRows())
-    .filter((row) => (!year || String(row.date || '').slice(0, 4) === year) && ['paid', 'partial'].includes(row.status));
+  const rows = (await fetchIncomeRows(year))
+    .filter((row) => ['paid', 'partial'].includes(row.status));
   return aggregateSums(rows, 'category', 'amount');
 }
 

@@ -1,9 +1,17 @@
 import { supabase } from '../supabase';
+import { deleteAutomaticTasksForSource, syncAutomaticTasksForVideoclip } from './automaticTasks';
+import { deleteFinanceForSource } from './finance';
 import type { Job } from '../types';
 
 export type VideoclipWithExtras = {
   id: string;
-  job_id: string;
+  job_id: string | null;
+  work_type: 'personal' | 'paid';
+  client_id: string | null;
+  amount: number | null;
+  payment_status: 'pending' | 'paid' | 'partial';
+  title: string;
+  description: string | null;
   artist: string | null;
   song: string | null;
   idea: string | null;
@@ -49,9 +57,7 @@ export async function getVideoclips(filters: VideoclipFilters = {}): Promise<Vid
 
   let q = supabase
     .from('filmmaker_videoclips')
-    .select('*, jobs!inner(id, title, status, clients(name))')
-    .eq('jobs.type', 'filmmaker_videoclip')
-    .eq('jobs.is_archived', false);
+    .select('*, jobs!left(id, title, status, clients!left(name))');
 
   if (filters.status) {
     q = q.eq('status', filters.status);
@@ -69,7 +75,13 @@ export async function getVideoclips(filters: VideoclipFilters = {}): Promise<Vid
   const rows = (data as any[]) || [];
   const items: VideoclipWithExtras[] = rows.map((row) => ({
     id: row.id,
-    job_id: row.job_id,
+    job_id: row.job_id ?? null,
+    work_type: row.work_type || 'personal',
+    client_id: row.client_id ?? null,
+    amount: row.amount ?? null,
+    payment_status: row.payment_status || 'pending',
+    title: row.title || row.jobs?.title || row.song || 'Sin título',
+    description: row.description ?? null,
     artist: row.artist ?? null,
     song: row.song ?? null,
     idea: row.idea ?? null,
@@ -139,6 +151,7 @@ export async function getVideoclipStats(): Promise<{
 
 export async function updateVideoclip(id: string, data: Partial<VideoclipWithExtras>): Promise<void> {
   const allowed: (keyof VideoclipWithExtras)[] = [
+    'title', 'description', 'work_type', 'client_id', 'amount', 'payment_status',
     'artist', 'song', 'idea', 'concept', 'references', 'locations', 'equipment',
     'preproduction_date', 'recording_date', 'first_delivery_date', 'final_delivery_date',
     'included_changes', 'requested_changes', 'project_path', 'status',
@@ -152,6 +165,109 @@ export async function updateVideoclip(id: string, data: Partial<VideoclipWithExt
 
   const { error } = await supabase.from('filmmaker_videoclips').update(updateData).eq('id', id);
   if (error) throw new Error(`DB error: ${error.message}`);
+
+  // Sync tasks after update
+  const { data: updated } = await supabase
+    .from('filmmaker_videoclips')
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (updated) {
+    void syncAutomaticTasksForVideoclip({
+      id: updated.id,
+      title: updated.title || updated.song || 'Sin título',
+      status: updated.status || 'idea',
+      preproduction_date: updated.preproduction_date,
+      recording_date: updated.recording_date,
+      first_delivery_date: updated.first_delivery_date,
+      final_delivery_date: updated.final_delivery_date,
+      requested_changes: updated.requested_changes,
+    });
+  }
+}
+
+export async function createVideoclip(data: Partial<VideoclipWithExtras>): Promise<VideoclipWithExtras> {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('filmmaker_videoclips').insert({
+    id,
+    job_id: data.job_id ?? null,
+    work_type: data.work_type || 'personal',
+    client_id: data.client_id ?? null,
+    amount: data.amount ?? null,
+    payment_status: data.payment_status || 'pending',
+    title: data.title || data.song || 'Sin título',
+    description: data.description ?? null,
+    artist: data.artist ?? null,
+    song: data.song ?? null,
+    idea: data.idea ?? null,
+    concept: data.concept ?? null,
+    references: data.references ?? null,
+    locations: data.locations ?? null,
+    equipment: data.equipment ?? null,
+    preproduction_date: data.preproduction_date ?? null,
+    recording_date: data.recording_date ?? null,
+    first_delivery_date: data.first_delivery_date ?? null,
+    final_delivery_date: data.final_delivery_date ?? null,
+    included_changes: data.included_changes ?? 0,
+    requested_changes: data.requested_changes ?? null,
+    project_path: data.project_path ?? null,
+    status: data.status || 'idea',
+    created_at: now,
+    updated_at: now,
+  });
+  if (error) throw new Error(`DB error: ${error.message}`);
+
+  const { data: created } = await supabase
+    .from('filmmaker_videoclips')
+    .select('*, jobs!left(id, title, status, clients!left(name))')
+    .eq('id', id)
+    .single();
+
+  const result = {
+    id: created.id,
+    job_id: created.job_id ?? null,
+    work_type: created.work_type || 'personal',
+    client_id: created.client_id ?? null,
+    amount: created.amount ?? null,
+    payment_status: created.payment_status || 'pending',
+    title: created.title || created.jobs?.title || created.song || 'Sin título',
+    description: created.description ?? null,
+    artist: created.artist ?? null,
+    song: created.song ?? null,
+    idea: created.idea ?? null,
+    concept: created.concept ?? null,
+    references: created.references ?? null,
+    locations: created.locations ?? null,
+    equipment: created.equipment ?? null,
+    preproduction_date: created.preproduction_date ?? null,
+    recording_date: created.recording_date ?? null,
+    first_delivery_date: created.first_delivery_date ?? null,
+    final_delivery_date: created.final_delivery_date ?? null,
+    included_changes: created.included_changes ?? null,
+    requested_changes: created.requested_changes ?? null,
+    project_path: created.project_path ?? null,
+    status: created.status,
+    created_at: created.created_at,
+    updated_at: created.updated_at,
+    job_title: created.jobs?.title ?? '',
+    job_status: created.jobs?.status ?? '',
+    client_name: created.jobs?.clients?.name ?? null,
+  };
+
+  // Sync tasks after create
+  void syncAutomaticTasksForVideoclip({
+    id: created.id,
+    title: created.title || created.song || 'Sin título',
+    status: created.status || 'idea',
+    preproduction_date: created.preproduction_date,
+    recording_date: created.recording_date,
+    first_delivery_date: created.first_delivery_date,
+    final_delivery_date: created.final_delivery_date,
+    requested_changes: created.requested_changes,
+  });
+
+  return result;
 }
 
 export async function backfillVideoclipsFromJobs(): Promise<void> {
@@ -218,5 +334,20 @@ export async function syncVideoclipForJob(job: Job, data: any = {}): Promise<voi
     created_at: now,
     updated_at: now,
   });
+  if (error) throw new Error(`DB error: ${error.message}`);
+}
+
+export async function archiveVideoclip(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('filmmaker_videoclips')
+    .update({ is_archived: true, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(`DB error: ${error.message}`);
+}
+
+export async function deleteVideoclip(id: string): Promise<void> {
+  await deleteAutomaticTasksForSource('videoclip', id);
+  await deleteFinanceForSource('videoclip', id);
+  const { error } = await supabase.from('filmmaker_videoclips').delete().eq('id', id);
   if (error) throw new Error(`DB error: ${error.message}`);
 }

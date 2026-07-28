@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { getClients } from '../lib/db/clients';
 import { getJobs, type JobFilters } from '../lib/db/jobs';
 import { getProjects } from '../lib/db/projects';
@@ -12,6 +12,24 @@ import { getAgendaItems } from '../lib/db/agenda';
 import { getTasks } from '../lib/db/tasks';
 import type { Client, Job, DigitalProject, Consultancy, MusicProject, Reel, YouTubeVideo, AgendaItem, Task } from '../lib/types';
 import { Avatar, StatusChip, EmptyState } from '../components/ui';
+
+const RECENTS_KEY = 'flowtrack-web-search-recents';
+const MAX_RECENTS = 6;
+
+function loadRecents(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveRecent(q: string) {
+  try {
+    const list = loadRecents().filter((x) => x !== q);
+    list.unshift(q);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, MAX_RECENTS)));
+  } catch {}
+}
 
 type ModuleKey = 'clients' | 'jobs' | 'projects' | 'music' | 'consultancies' | 'reels' | 'youtube' | 'videoclips';
 
@@ -28,15 +46,28 @@ const MODULES: { key: ModuleKey; icon: string; label: string; gradient: string }
 
 export function SearchPage() {
   const navigate = useNavigate();
-  const [query, setQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const [query, setQuery] = useState(searchParams.get('q') || '');
   const [results, setResults] = useState<{ module: string; items: any[] }[]>([]);
   const [searching, setSearching] = useState(false);
+  const [recents, setRecents] = useState<string[]>(() => loadRecents());
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return; }
     const timer = setTimeout(() => doSearch(query.trim()), 280);
     return () => clearTimeout(timer);
   }, [query]);
+
+  const clearRecent = (q: string) => {
+    const next = recents.filter((r) => r !== q);
+    setRecents(next);
+    try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  const clearAllRecents = () => {
+    setRecents([]);
+    try { localStorage.removeItem(RECENTS_KEY); } catch {}
+  };
 
   const doSearch = async (q: string) => {
     setSearching(true);
@@ -72,6 +103,11 @@ export function SearchPage() {
       const filteredTasks = tasks.filter((t) => match([t.title, t.description, t.area]));
       if (filteredTasks.length) r.push({ module: 'Tareas', items: filteredTasks.slice(0, 6) });
       setResults(r);
+      // Persistir término reciente
+      if (q.length >= 2) {
+        saveRecent(q);
+        setRecents(loadRecents());
+      }
     } catch (e) {
       console.error('Search error:', e);
     } finally {
@@ -156,6 +192,36 @@ export function SearchPage() {
             ))}
           </div>
 
+          {/* Recientes — buscar historial */}
+          {recents.length > 0 && (
+            <div className="mt-4 stagger-item">
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[10px] font-semibold text-[var(--color-text-disabled)] uppercase tracking-wider">🕑 Búsquedas recientes</p>
+                <button
+                  onClick={clearAllRecents}
+                  className="text-[10px] text-[var(--color-text-tertiary)] active:scale-95 transition cursor-pointer"
+                >Limpiar</button>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {recents.map((q) => (
+                  <div key={q} className="inline-flex items-center gap-1 group">
+                    <button
+                      onClick={() => setQuery(q)}
+                      className="px-2.5 py-1 rounded-full bg-[var(--color-surface)] border border-[var(--color-border)] text-[11px] text-[var(--color-text-secondary)] active:scale-95 transition cursor-pointer"
+                    >
+                      {q}
+                    </button>
+                    <button
+                      onClick={() => clearRecent(q)}
+                      className="opacity-50 hover:opacity-100 text-[10px] text-[var(--color-text-tertiary)] -ml-1.5 w-4 h-4 flex items-center justify-center rounded-full transition cursor-pointer"
+                      aria-label={`Borrar ${q}`}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Tip card */}
           <div className="mt-4 p-3 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] space-y-1.5 stagger-item">
             <p className="text-[10px] font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider">💡 Tip</p>
@@ -185,17 +251,29 @@ function ResultRow({ item, module, navigate }: { item: any; module: string; navi
     switch (module) {
       case 'Clientes': return `/clientes/${item.id}`;
       case 'Trabajos': return `/trabajos/${item.id}`;
-      default: return '#';
+      default: return null; // no hay páginas de detalle para estos módulos aún
+    }
+  };
+
+  const handleClick = () => {
+    const url = linkTo();
+    if (url) {
+      navigate(url);
+    } else {
+      // Si no hay página de detalle, busca por el título
+      const title = getTitle();
+      navigate(`/buscar?q=${encodeURIComponent(title)}`);
     }
   };
 
   const showAvatar = module === 'Clientes' || module === 'Trabajos';
+  const hasLink = linkTo() !== null;
 
   return (
     <div
-      onClick={() => { if (linkTo() !== '#') navigate(linkTo()); }}
+      onClick={handleClick}
       className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl active:bg-[var(--color-surface-hover)] transition cursor-pointer ${
-        linkTo() === '#' ? '' : 'active:scale-[0.98]'
+        hasLink ? 'active:scale-[0.98]' : ''
       }`}
     >
       {showAvatar ? (

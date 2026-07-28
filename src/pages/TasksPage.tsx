@@ -3,6 +3,7 @@ import { localDateKey } from '../lib/date';
 import { getTasks, createTask, updateTask } from '../lib/db/tasks';
 import type { Task } from '../lib/types';
 import { SkeletonRow, EmptyState, ErrorState } from '../components/ui';
+import { useToast } from '../components/Toast';
 
 type TabKey = 'today' | 'upcoming' | 'overdue' | 'done';
 
@@ -34,27 +35,46 @@ const PRIORITY_LABEL: Record<string, string> = {
   low: 'Baja',
 };
 
+const AREA_LABELS: Record<string, string> = {
+  content: '🎬 Contenido',
+  video: '🎥 Video',
+  development: '🛠️ Dev',
+  admin: '📋 Admin',
+  finance: '💰 Finanzas',
+  consultancy: '🎓 Asesoría',
+  design: '🎨 Diseño',
+  production: '🎧 Producción',
+};
+
+function getAreaLabel(area: string): string {
+  return AREA_LABELS[area] || area;
+}
+
 export function TasksPage() {
+  const toast = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<TabKey>('today');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [areaFilter, setAreaFilter] = useState<string>('');
   const [showCreate, setShowCreate] = useState(false);
   const today = localDateKey(new Date());
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getTasks();
+      const data = await getTasks({ status: statusFilter || undefined, area: areaFilter || undefined });
       data.sort((a, b) => (a.due_date || '9999').localeCompare(b.due_date || '9999'));
       setTasks(data);
       setError('');
     } catch (e: any) {
       setError(String(e?.message || e));
+      toast.error('Error cargando tareas');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast, statusFilter, areaFilter]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -63,8 +83,10 @@ export function TasksPage() {
     try {
       await updateTask(task.id, { status: next });
       setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: next } : t)));
+      toast.success(next === 'completed' ? 'Tarea completada ✓' : 'Tarea reabierta');
     } catch (e) {
       console.error('toggle task:', e);
+      toast.error('No se pudo actualizar', { label: 'Reintentar', onClick: load });
     }
   };
 
@@ -73,8 +95,10 @@ export function TasksPage() {
       await createTask({ title, due_date: dueDate || null, priority, status: 'pending' });
       setShowCreate(false);
       load();
+      toast.success('Tarea creada ✓');
     } catch (e) {
       console.error('create task:', e);
+      toast.error('Error creando tarea');
     }
   };
 
@@ -153,6 +177,39 @@ export function TasksPage() {
         </div>
       </div>
 
+      {/* Filtros inline — pills de estado y área */}
+      <div className="sticky top-[88px] z-10 bg-[var(--color-bg)]/95 backdrop-blur-xl px-3 py-1.5 border-b border-[var(--color-border)]">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
+          {['', 'pending', 'in_progress', 'blocked', 'testing', 'completed'].map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatusFilter(s === statusFilter ? '' : s)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition active:scale-95 cursor-pointer whitespace-nowrap ${
+                statusFilter === s
+                  ? 'bg-[var(--color-primary)] text-[var(--color-text-on-accent)]'
+                  : 'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-tertiary)]'
+              }`}
+            >
+              {s ? { pending: 'Pendiente', in_progress: 'En curso', blocked: 'Bloqueada', testing: 'En prueba', completed: 'Completada' }[s] : 'Todas'}
+            </button>
+          ))}
+          <span className="w-px bg-[var(--color-border)] mx-1" />
+          {['', 'content', 'video', 'development', 'admin', 'finance', 'consultancy', 'design'].map((a) => (
+            <button
+              key={a}
+              onClick={() => setAreaFilter(a === areaFilter ? '' : a)}
+              className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition active:scale-95 cursor-pointer whitespace-nowrap ${
+                areaFilter === a
+                  ? 'bg-[var(--color-primary)]/20 text-[var(--color-primary)] border border-[var(--color-primary)]/30'
+                  : 'bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text-tertiary)]'
+              }`}
+            >
+              {a ? { content: '🎬 Contenido', video: '🎥 Video', development: '🛠️ Dev', admin: '📋 Admin', finance: '💰 Finanzas', consultancy: '🎓 Asesoría', design: '🎨 Diseño' }[a] : 'Todos'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="px-3 pt-3">
         {filtered.length === 0 ? (
           <EmptyState
@@ -219,7 +276,13 @@ function TaskRow({ task, onToggle }: { task: Task; onToggle: (t: Task) => void }
           {task.area && (
             <>
               <span className="text-[var(--color-text-disabled)]">·</span>
-              <span className="truncate">{task.area}</span>
+              <span className="truncate">{getAreaLabel(task.area)}</span>
+            </>
+          )}
+          {(task.subtask_count || 0) > 0 && (
+            <>
+              <span className="text-[var(--color-text-disabled)]">·</span>
+              <span className="text-[var(--color-text-tertiary)]">{task.subtask_count} sub</span>
             </>
           )}
         </p>

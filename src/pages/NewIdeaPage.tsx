@@ -6,8 +6,11 @@ import { createYouTubeVideo } from '../lib/db/youtube';
 import { createTask } from '../lib/db/tasks';
 import { createAgendaItem } from '../lib/db/agenda';
 import { createProject } from '../lib/db/projects';
+import { createConsultancy } from '../lib/db/consultancies';
+import { createVideoclip } from '../lib/db/videoclips';
+import { useToast } from '../components/Toast';
 
-type IdeaType = 'reel' | 'youtube' | 'task' | 'agenda' | 'project';
+type IdeaType = 'reel' | 'youtube' | 'task' | 'agenda' | 'project' | 'consultancy' | 'videoclip';
 
 const TYPE_OPTIONS: { key: IdeaType; icon: string; label: string; sub: string; gradient: string }[] = [
   { key: 'reel',    icon: '🎬', label: 'Idea Reel',   sub: 'Para grabar pronto',     gradient: 'from-pink-500/15 to-rose-500/15' },
@@ -15,10 +18,13 @@ const TYPE_OPTIONS: { key: IdeaType; icon: string; label: string; sub: string; g
   { key: 'task',    icon: '✅', label: 'Tarea',        sub: 'Pendiente con fecha',   gradient: 'from-blue-500/15 to-sky-500/15' },
   { key: 'agenda',  icon: '🗓️', label: 'Agenda',       sub: 'Evento programado',     gradient: 'from-amber-500/15 to-yellow-500/15' },
   { key: 'project', icon: '🛠️', label: 'Proyecto',     sub: 'Desarrollo digital',    gradient: 'from-violet-500/15 to-purple-500/15' },
+  { key: 'consultancy', icon: '🎓', label: 'Asesoría', sub: 'Sesión con cliente',    gradient: 'from-fuchsia-500/15 to-purple-500/15' },
+  { key: 'videoclip', icon: '🎥', label: 'Videoclip',   sub: 'Producción audiovisual', gradient: 'from-indigo-500/15 to-blue-500/15' },
 ];
 
 export function NewIdeaPage() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [type, setType] = useState<IdeaType | null>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
@@ -49,11 +55,18 @@ export function NewIdeaPage() {
         case 'project':
           await createProject({ name: title.trim(), notes: notes || null, status: 'idea', priority } as any);
           break;
+        case 'consultancy':
+          await createConsultancy({ topic: title.trim(), pre_notes: notes || null, date, status: 'requested', priority } as any);
+          break;
+        case 'videoclip':
+          await createVideoclip({ title: title.trim(), idea: notes || null, status: 'idea' } as any);
+          break;
       }
       setDone(true);
       setTimeout(() => navigate('/'), 1500);
     } catch (err) {
       console.error('Error creating idea:', err);
+      toast.error('No se pudo guardar la idea');
     } finally {
       setSaving(false);
     }
@@ -131,6 +144,8 @@ export function NewIdeaPage() {
               type === 'reel' ? '¿De qué va el reel?' :
               type === 'youtube' ? 'Título del video' :
               type === 'project' ? 'Nombre del proyecto' :
+              type === 'consultancy' ? 'Tema de la asesoría' :
+              type === 'videoclip' ? 'Nombre del videoclip' :
               '¿Qué hay que hacer?'
             }
             value={title}

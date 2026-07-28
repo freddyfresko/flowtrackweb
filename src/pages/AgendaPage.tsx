@@ -3,6 +3,7 @@ import { localDateKey } from '../lib/date';
 import { getAgendaItems, createAgendaItem, updateAgendaItem } from '../lib/db/agenda';
 import type { AgendaItem } from '../lib/types';
 import { SkeletonRow, EmptyState, ErrorState } from '../components/ui';
+import { useToast } from '../components/Toast';
 
 const TYPE_LABELS: Record<string, string> = {
   meeting: 'Reunión', call: 'Llamada', recording: 'Grabación',
@@ -42,10 +43,12 @@ const PRIORITY_RING: Record<string, string> = {
 };
 
 export function AgendaPage() {
+  const toast = useToast();
   const [items, setItems] = useState<AgendaItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [editItem, setEditItem] = useState<AgendaItem | null>(null);
   const today = localDateKey(new Date());
 
   const load = useCallback(async () => {
@@ -57,10 +60,11 @@ export function AgendaPage() {
       setError('');
     } catch (e: any) {
       setError(String(e?.message || e));
+      toast.error('Error cargando agenda');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -69,8 +73,10 @@ export function AgendaPage() {
     try {
       await updateAgendaItem(item.id, { status: next });
       setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, status: next } : i)));
+      toast.success(next === 'done' ? 'Evento completado ✓' : 'Evento reaberto');
     } catch (e) {
       console.error('update agenda:', e);
+      toast.error('No se pudo actualizar', { label: 'Reintentar', onClick: load });
     }
   };
 
@@ -82,8 +88,22 @@ export function AgendaPage() {
       } as any);
       setShowCreate(false);
       load();
+      toast.success('Evento creado ✓');
     } catch (e) {
       console.error('create agenda:', e);
+      toast.error('Error creando evento');
+    }
+  };
+
+  const onEdit = async (id: string, data: Partial<AgendaItem>) => {
+    try {
+      await updateAgendaItem(id, data as any);
+      setEditItem(null);
+      load();
+      toast.success('Evento actualizado ✓');
+    } catch (e) {
+      console.error('edit agenda:', e);
+      toast.error('Error actualizando evento');
     }
   };
 
@@ -145,7 +165,7 @@ export function AgendaPage() {
             {overdueItems.length > 0 && (
               <Section title="Atrasadas" icon="🔴" count={overdueItems.length} tone="danger">
                 {overdueItems.slice(0, 10).map((item) => (
-                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} overdue />
+                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} onEdit={setEditItem} overdue />
                 ))}
               </Section>
             )}
@@ -154,7 +174,7 @@ export function AgendaPage() {
             {todayItems.length > 0 && (
               <Section title="Hoy" icon="📌" count={todayItems.length} tone="primary">
                 {todayItems.map((item) => (
-                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} />
+                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} onEdit={setEditItem} />
                 ))}
               </Section>
             )}
@@ -163,7 +183,7 @@ export function AgendaPage() {
             {upcomingItems.length > 0 && (
               <Section title="Próximas" icon="📅" count={Math.min(upcomingItems.length, 15)}>
                 {upcomingItems.slice(0, 15).map((item) => (
-                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} />
+                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} onEdit={setEditItem} />
                 ))}
               </Section>
             )}
@@ -172,7 +192,7 @@ export function AgendaPage() {
             {doneItems.length > 0 && (
               <Section title="Hechas" icon="✅" count={doneItems.length} muted>
                 {doneItems.slice(0, 5).map((item) => (
-                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} done />
+                  <AgendaRow key={item.id} item={item} onToggle={onStatusToggle} onEdit={setEditItem} done />
                 ))}
               </Section>
             )}
@@ -181,9 +201,12 @@ export function AgendaPage() {
       </div>
 
       {showCreate && <CreateSheet onClose={() => setShowCreate(false)} onCreate={onCreate} />}
+      {editItem && <EditSheet item={editItem} onClose={() => setEditItem(null)} onSave={onEdit} />}
     </div>
   );
 }
+
+// ─── Sheets ───
 
 function Section({ title, icon, count, tone, muted, children }: {
   title: string;
@@ -206,15 +229,17 @@ function Section({ title, icon, count, tone, muted, children }: {
   );
 }
 
-function AgendaRow({ item, onToggle, overdue, done }: {
+function AgendaRow({ item, onToggle, onEdit, overdue, done }: {
   item: AgendaItem;
   onToggle: (i: AgendaItem) => void;
+  onEdit: (item: AgendaItem) => void;
   overdue?: boolean;
   done?: boolean;
 }) {
   const [animating, setAnimating] = useState(false);
 
-  const handleToggle = () => {
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
     setAnimating(true);
     setTimeout(() => setAnimating(false), 250);
     onToggle(item);
@@ -222,19 +247,22 @@ function AgendaRow({ item, onToggle, overdue, done }: {
 
   return (
     <div
-      onClick={handleToggle}
+      onClick={() => !done && onEdit(item)}
       className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl cursor-pointer active:scale-[0.98] transition-all duration-200 ${
         done ? 'opacity-50 bg-transparent border border-[var(--color-border)] border-dashed' : 'bg-[var(--color-surface)] border border-[var(--color-border)]'
       } ${overdue ? TYPE_COLORS[item.item_type] || 'border-l-gray-500' : ''} border-l-2 ${
         animating ? 'scale-[0.96] bg-[var(--color-surface-hover)]' : ''
       }`}
     >
-      {/* Checkbox circular */}
-      <span className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-        done
-          ? 'bg-green-500/20 text-green-500'
-          : 'border-2 border-[var(--color-border-strong)]'
-      } ${!done && item.priority ? PRIORITY_RING[item.priority] || '' : ''}`}>
+      {/* Checkbox circular — solo toggle */}
+      <span
+        onClick={handleToggle}
+        className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 transition-all cursor-pointer ${
+          done
+            ? 'bg-green-500/20 text-green-500'
+            : 'border-2 border-[var(--color-border-strong)] hover:border-[var(--color-primary)]'
+        } ${!done && item.priority ? PRIORITY_RING[item.priority] || '' : ''}`}
+      >
         {done ? '✓' : ''}
       </span>
 
@@ -255,7 +283,116 @@ function AgendaRow({ item, onToggle, overdue, done }: {
           )}
         </p>
       </div>
+
+      {!done && <span className="text-[10px] text-[var(--color-text-tertiary)] opacity-0 group-hover:opacity-100">✏️</span>}
     </div>
+  );
+}
+
+function EditSheet({ item, onClose, onSave }: {
+  item: AgendaItem;
+  onClose: () => void;
+  onSave: (id: string, data: Partial<AgendaItem>) => Promise<void>;
+}) {
+  const [title, setTitle] = useState(item.title);
+  const [date, setDate] = useState(item.date);
+  const [time, setTime] = useState(item.time || '');
+  const [itemType, setItemType] = useState(item.item_type || 'reminder');
+  const [priority, setPriority] = useState(item.priority || 'medium');
+  const [description, setDescription] = useState(item.description || '');
+  const [saving, setSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || saving) return;
+    setSaving(true);
+    await onSave(item.id, {
+      title: title.trim(),
+      date,
+      time: time || null,
+      item_type: itemType,
+      priority,
+      description: description || null,
+    } as any);
+    setSaving(false);
+  };
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 animate-fade-in" onClick={onClose} />
+      <div className="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl bg-[var(--color-surface)] border-t border-[var(--color-border)] p-4 pb-[calc(env(safe-area-inset-bottom)+16px)] animate-sheet-in">
+        <div className="absolute top-1.5 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-[var(--color-border-strong)]" />
+        <div className="flex items-center justify-between mb-4 mt-1">
+          <h2 className="text-sm font-bold text-[var(--color-text)]">✏️ Editar evento</h2>
+          <button onClick={onClose} className="text-xs text-[var(--color-text-tertiary)] px-2 py-1 rounded-lg active:scale-90 cursor-pointer">Cancelar</button>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            autoFocus
+            placeholder="Título del evento..."
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--color-border)] text-sm text-[var(--color-text)] placeholder-[var(--color-text-disabled)]"
+          />
+
+          <textarea
+            placeholder="Descripción (opcional)"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={2}
+            className="w-full px-3 py-2.5 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--color-border)] text-sm text-[var(--color-text)] placeholder-[var(--color-text-disabled)] resize-none"
+          />
+
+          <div className="flex gap-2">
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+              className="flex-1 px-3 py-2.5 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--color-border)] text-sm text-[var(--color-text)]" />
+            <input type="time" value={time} onChange={(e) => setTime(e.target.value)}
+              className="flex-1 px-3 py-2.5 rounded-xl bg-[var(--color-surface-elevated)] border border-[var(--color-border)] text-sm text-[var(--color-text)]" />
+          </div>
+
+          <div>
+            <p className="text-[10px] font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider mb-1.5">Tipo</p>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(TYPE_LABELS).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setItemType(k)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition active:scale-95 cursor-pointer ${
+                    itemType === k
+                      ? 'bg-[var(--color-primary)] text-[var(--color-text-on-accent)]'
+                      : 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]'
+                  }`}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-semibold text-[var(--color-text-tertiary)] uppercase tracking-wider mb-1.5">Prioridad</p>
+            <div className="flex gap-1.5">
+              {[
+                { k: 'low', label: 'Baja', color: 'bg-gray-500' },
+                { k: 'medium', label: 'Media', color: 'bg-blue-500' },
+                { k: 'high', label: 'Alta', color: 'bg-orange-500' },
+                { k: 'urgent', label: 'Urgente', color: 'bg-red-500' },
+              ].map((p) => (
+                <button key={p.k} type="button" onClick={() => setPriority(p.k)}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-[11px] font-medium transition active:scale-95 cursor-pointer ${
+                    priority === p.k
+                      ? 'bg-[var(--color-primary)] text-[var(--color-text-on-accent)]'
+                      : 'bg-[var(--color-surface-hover)] text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${p.color}`} />{p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <button type="submit" disabled={!title.trim() || saving}
+            className="w-full py-3 rounded-xl bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary-hover)] text-[var(--color-text-on-accent)] text-sm font-semibold disabled:opacity-50 active:scale-[0.98] transition cursor-pointer"
+          >{saving ? 'Guardando...' : '💾 Guardar cambios'}</button>
+        </form>
+      </div>
+    </>
   );
 }
 
