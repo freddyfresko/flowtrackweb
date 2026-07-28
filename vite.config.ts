@@ -42,16 +42,6 @@ export default defineConfig({
         navigateFallback: '/index.html',
         runtimeCaching: [
           {
-            // Supabase data — network-first (siempre fresco cuando hay señal)
-            urlPattern: /^https:\/\/.*\.supabase\.co\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-cache',
-              networkTimeoutSeconds: 8,
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
-          {
             // Google Fonts — cache first, long TTL
             urlPattern: /^https:\/\/fonts\.googleapis\.com\//,
             handler: 'CacheFirst',
